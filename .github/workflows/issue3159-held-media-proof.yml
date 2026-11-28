@@ -1,0 +1,121 @@
+name: Issue 3159 held production media proof
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue3159-held-media-proof.py'
+      - '.github/workflows/issue3159-held-media-proof.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-held-media-proof.yml'
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m py_compile repair/scripts/issue3159-held-media-proof.py
+          python -m pip install -q pillow
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          text=Path('repair/scripts/issue3159-held-media-proof.py').read_text()
+          ast.parse(text)
+          for forbidden in ('requests.post','requests.patch','requests.put','requests.delete','update_record(','put_object(','/jobs/studio-produce/resume'):
+              assert forbidden not in text
+          assert 'drive.download_file_to_path' in text and 'volumedetect' in text
+          assert 'RECOVERY3159_MEDIA=' in text
+          print('EXACT_HELD_MEDIA_STATIC_PASS')
+          PY
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - name: Protected read-only exact source byte inspection
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          python - <<'PY'
+          import hashlib,json,os,re
+          from pathlib import Path
+          source=Path('repair/scripts/issue3159-held-media-proof.py')
+          sha=os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          expected=hashlib.sha256(source.read_bytes()).hexdigest()
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          command=("$ErrorActionPreference='Stop';"
+            "$tmp=Join-Path $env:TEMP ('issue3096-source-audit-'+[guid]::NewGuid().ToString('N')+'.py');"
+            f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+            f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
+            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+          Path('/tmp/request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          job=''
+          for attempt in $(seq 1 36); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "audit_ops_http=$code"; exit 1; }
+            sleep 5
+          done
+          test -n "$job"
+          echo "audit_job_id=$job"
+          for attempt in $(seq 1 90); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status' /tmp/status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          job=json.loads(Path('/tmp/status.json').read_text())['job']
+          out=job.get('log','')
+          lines=[line for line in out.splitlines() if line.startswith('RECOVERY3159_MEDIA=')]
+          errors=[line for line in out.splitlines() if re.fullmatch(r'RECOVERY3159_MEDIA_ERROR=[A-Za-z_]+',line)]
+          for error in errors: print(error)
+          if job['status']!='ok': raise SystemExit('protected_media_audit_failed')
+          assert len(lines)==1,'audit_receipt_incomplete'
+          receipt=json.loads(lines[0].split('=',1)[1])
+          assert receipt['output']==11246 and receipt['canonical_unchanged'] is True
+          assert receipt['output_writes']==receipt['provider_writes']==0
+          assert receipt['drive']['decode']==receipt['preview']['decode']=='PASS'
+          print(lines[0])
+          PY
+      - name: Record protected evidence status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-held-media-proof",target_url:$url,description:"Exact held production media proof"}' >/tmp/media-status.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/media-status.json >/dev/null
