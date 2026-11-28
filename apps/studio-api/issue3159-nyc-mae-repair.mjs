@@ -1,4 +1,5 @@
 // #3159 exact fresh NYC schedule repair; no publishing authorization or retry reset.
+import { studioScheduleHorizonDays } from "./worker-functions-02.mjs";
 import { factorySupabaseApprovalRows } from "./factory-supabase-approval.mjs";
 import { factoryBatchLock, factoryBatchUnlock } from "./factory-approval-queue.mjs";
 import { withOutputApprovalLock } from "./output-approval-lease.mjs";
@@ -194,6 +195,7 @@ export async function recoverNycGalleryMae(env, id, {horizonDays, now=Date.now} 
 /** One exact candidate per tick; completed/ambiguous receipts never replay. */
 export async function runNycGalleryMaeRepair(env,{horizonDays,now=Date.now}={}){
   if(!env.STUDIO_MEDIA||env.STUDIO_3159_NYC_MAE_DISABLED==="true")return {status:"disabled"};
+  horizonDays=horizonDays??await studioScheduleHorizonDays(env);
   for(const id of Object.keys(TARGETS)){
     const marker="studio/state/3159-nyc-mae/"+id+".json";
     if(await env.STUDIO_MEDIA.get(marker))continue;
@@ -201,7 +203,8 @@ export async function runNycGalleryMaeRepair(env,{horizonDays,now=Date.now}={}){
     if(!nycScheduleRepairEligible(entry,id))continue;
     const result=await recoverNycGalleryMae(env,id,{horizonDays,now});
     if(result.rescheduled)await env.STUDIO_MEDIA.put(marker,JSON.stringify(result),{onlyIf:new Headers({"If-None-Match":"*"})});
-    return result;
+    if(result.rescheduled)return result;
+    if(!result.skipped)return result;
   }
   return {status:"no_eligible_exact_record"};
 }
