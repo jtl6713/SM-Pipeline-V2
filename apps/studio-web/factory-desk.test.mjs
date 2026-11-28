@@ -148,3 +148,19 @@ test("Factory hides failed video element so its poster cannot impersonate a succ
   assert.match(css, /#page-factory \.library-preview-dialog>video\[hidden\]/);
   assert.match(css, /#page-factory \.library-preview-dialog>img\[hidden\]\{display:none!important\}/);
 });
+
+
+test("pending accepted Factory group resumes only original exact selection", async () => {
+  const {runInNewContext} = await import("node:vm");
+  const source=await readFile(path.join(here,"assets/factory-desk.js"),"utf8");
+  const start=source.indexOf("  function factoryPendingGroupResumePayload(batch)");
+  const end=source.indexOf("  async function resumeFactoryPendingGroup",start);
+  assert.ok(start>=0&&end>start);
+  const payload=runInNewContext(source.slice(start,end)+"\nfactoryPendingGroupResumePayload");
+  const original={group:true,request_id:"original-batch-123",total:2,pending_count:1,items:[{id:"recApproved",status:"approved"},{id:"recPending",status:"queued"}]};
+  assert.deepEqual(JSON.parse(JSON.stringify(payload(original))),{action:"start_group",request_id:"original-batch-123",record_ids:["recApproved","recPending"]});
+  for(const bad of [{...original,preview_only:true},{...original,pending_count:0},{...original,items:[original.items[1]]},{...original,items:[original.items[0],original.items[0]]},{...original,group:false},{...original,request_id:""}])assert.equal(payload(bad),null);
+  assert.match(source,/retry\.textContent[^\n]*"Resume Pending"/);
+  assert.match(source,/if \(resume\) return resumeFactoryPendingGroup\(batch, resume, viewed\)/);
+  assert.match(source,/result\.already_submitted !== true/);
+});
