@@ -1,6 +1,7 @@
 """Exact Zoo Factory continuation, using existing Runner service credential."""
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import requests
@@ -8,7 +9,8 @@ from dotenv import load_dotenv
 
 BASE=Path.cwd()/"Services"/"pipeline-runner"/"service"
 PROJECT="https://vkwvscgisqsbuwagdvtb.supabase.co"
-URL="https://studio.chicagoshining.com/api/internal/factory/zoo3093-resume"
+URL=os.environ.get("ZOO_FACTORY_BRIDGE_URL","")
+EXACT_ROUTE="/api/internal/factory/zoo3093-resume"
 GROUP="e3aff4f8-a9c4-4333-876d-e0523144f293"
 ACTOR="recaKAksAFrEv21RO"
 
@@ -16,6 +18,7 @@ def require(ok,reason):
     if not ok:raise RuntimeError(reason)
 
 def main():
+    require(re.fullmatch(r"https://studio-zoo-factory-[0-9]+-[0-9]+\.[a-z0-9-]+\.workers\.dev/[A-Za-z0-9_-]{43}",URL),"bridge_url_scope")
     require((BASE/".env").is_file(),"runner_env_missing")
     load_dotenv(BASE/".env",override=False)
     require(os.environ.get("SUPABASE_URL","").rstrip("/")==PROJECT,"wrong_project")
@@ -43,6 +46,11 @@ def main():
     if len(approved)<6:
         response=requests.post(URL,headers={"X-Pipeline-Secret":secret,"Accept":"application/json"},data=b"",timeout=150,allow_redirects=False)
         print("ZOO_FACTORY_HTTP="+str(response.status_code),flush=True)
+        if response.status_code!=200:
+            try:
+                detail=response.json().get("error")
+                if isinstance(detail,str) and re.fullmatch(r"[A-Za-z _]{1,100}",detail):print("ZOO_FACTORY_ERROR="+detail,flush=True)
+            except ValueError:pass
         require(response.status_code==200,"resume_not_confirmed")
         data=response.json()
         require(data.get("ok") is True and data.get("request_id")==GROUP and data.get("publication_authorized") is False,"response_scope")
