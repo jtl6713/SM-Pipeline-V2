@@ -5,6 +5,18 @@ export const WINDOWS_OUTAGE_STARTED_AT = "2026-11-26T09:00:00.000Z";
 // Set only to a verified recovery instant after runner/media/DB/canary checks,
 // interrupted attempt reconciliation and scheduler capacity validation.
 export const WINDOWS_OUTAGE_RESUMED_AT = null;
+// Stage 1: restore bounded nonpublishing work independently of the publication fence.
+export const WINDOWS_OUTAGE_PRODUCTION_ENABLED = true;
+
+export function windowsOutageProductionPaused(nowMs = Date.now(), resumedAt = WINDOWS_OUTAGE_RESUMED_AT, enabled = WINDOWS_OUTAGE_PRODUCTION_ENABLED) {
+  return windowsOutageState(nowMs, resumedAt).active && enabled !== true;
+}
+
+export function windowsOutageCronInventoryAllowed(crons, nowMs = Date.now(), resumedAt = WINDOWS_OUTAGE_RESUMED_AT, enabled = WINDOWS_OUTAGE_PRODUCTION_ENABLED) {
+  if (!Array.isArray(crons)) return false;
+  if (!windowsOutageState(nowMs, resumedAt).active) return true;
+  return crons.length === 0 || (enabled === true && crons.length === 1 && crons[0] === "* * * * *");
+}
 
 export function windowsOutageState(nowMs = Date.now(), resumedAt = WINDOWS_OUTAGE_RESUMED_AT) {
   const start = Date.parse(WINDOWS_OUTAGE_STARTED_AT);

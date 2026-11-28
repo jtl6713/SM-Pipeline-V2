@@ -1,4 +1,4 @@
-import { windowsOutageState } from "./windows-outage-control.mjs";
+import { windowsOutageProductionPaused } from "./windows-outage-control.mjs";
 import { newIdeaProductionCapture, isExplicitManualIdea } from "./production-mode-capture.mjs";
 import { verifiedVibeDraftInput, verifiedVibeDraftReceipt } from "./vibe-dedicated-intake.mjs";
 import { assertAutomaticPhotoWaitExisting } from "./automatic-photo-wait-create.mjs";
@@ -1310,7 +1310,7 @@ export function studioRenderAudioPreflight(row) {
 /*__STUDIO_WORKER_END:studioRenderAudioPreflight__*/
 
 export async function studioAdmitRenderQueue(env, options = {}) {
-  if (windowsOutageState().active) return { admitted: false, reason: "windows_outage_paused", waiting: null, started: null };
+  if (windowsOutageProductionPaused()) return { admitted: false, reason: "windows_outage_paused", waiting: null, started: null };
   const controls = options.controls || await readOpsQueueControls(env);
   const candidates = await studioLoadRenderQueueCandidates(env, {
     limit: Number(options.limit || 80),
