@@ -757,7 +757,7 @@ def test_exact_market_story_revision_requires_original_copy_and_source(parent_id
         Render_Clip_List_JSON='[{"durationFrames":300}]',Publish_Status="Not Ready",
         Do_Not_Publish=True,Auto_Publish_Enabled=False,
         Publish_Hold_Reason="Music duration not verified; repair before rendering.",
-        Output_Caption=spec["old_caption"],Selected_Assets_JSON=json.dumps({
+        Output_Caption=spec["old_caption"],Output_Hashtags=spec["old_caption"].rsplit("\n\n",1)[-1],Selected_Assets_JSON=json.dumps({
             "target_total_frames":300,"selected_clips":[dict(zip(keys,spec["clip"]))]}))
     row["id"]=spec["outputs"][0]
     assert story.story_text_for_output(row,p)==spec["text"]
@@ -766,7 +766,7 @@ def test_exact_market_story_revision_requires_original_copy_and_source(parent_id
     assert spec["fingerprint"]!=spec["previous_fingerprint"]
     assert "#Chicago" not in spec["caption"] and len(spec["text"].split())<=20
     for patch in (
-        {"Output_Caption":"changed"}, {"Output_Caption":spec["caption"]},
+        {"Output_Caption":"changed"}, {"Output_Caption":spec["caption"]}, {"Output_Hashtags":"#Wrong"},
         {"Selected_Assets_JSON":json.dumps({"selected_clips":[{}]})},
         {"Do_Not_Publish":False},{"Review_Status":"Approved"},
         {"Scheduled_Post_Date":"2026-12-01"},{"Production_Approved_At":"2026-11-25"},
@@ -780,6 +780,7 @@ def test_exact_market_story_revision_requires_original_copy_and_source(parent_id
     with pytest.raises(story.StoryVoiceoverError):
         story.story_text_for_output(row,drift)
     accepted=deepcopy(row); accepted["fields"]["Output_Caption"]=spec["caption"]
+    accepted["fields"]["Output_Hashtags"]=spec["caption"].rsplit("\n\n",1)[-1]
     accepted["fields"][story.RECEIPT]=json.dumps({"state":"verified","fingerprint":spec["fingerprint"],"text":spec["text"]})
     assert story.story_text_for_output(accepted,p)==spec["text"]
     unrelated=deepcopy(row); unrelated["id"]="recUnrelated"
@@ -803,7 +804,7 @@ def test_market_story_binding_is_output_only_and_shared_paid_claim_once(monkeypa
         row=output(Content_Item=[parent_id],Output_Status="In Production",Render_Status="Ready for Render",
             Publish_Status="Not Ready",Do_Not_Publish=True,Auto_Publish_Enabled=False,
             Publish_Hold_Reason="Music duration not verified; repair before rendering.",
-            Output_Caption=spec["old_caption"],Selected_Assets_JSON=json.dumps({
+            Output_Caption=spec["old_caption"],Output_Hashtags=spec["old_caption"].rsplit("\n\n",1)[-1],Selected_Assets_JSON=json.dumps({
                 "target_total_frames":300,"selected_clips":[dict(zip(keys,spec["clip"]))]}))
         row["id"]=ident;rows[ident]=row
     original=deepcopy(p)
@@ -831,6 +832,7 @@ def test_market_story_binding_is_output_only_and_shared_paid_claim_once(monkeypa
     for ident in spec["outputs"]:
         result=story.ensure_story_voiceover(client,deepcopy(rows[ident]),p)
         assert result["fields"]["Output_Caption"]==spec["caption"]
+        assert result["fields"]["Output_Hashtags"]==spec["caption"].rsplit("\n\n",1)[-1]
         rec=json.loads(result["fields"][story.RECEIPT])
         assert rec["creative_revision"]=="3159-market-story-v1"
         assert rec["previous_fingerprint"]==spec["previous_fingerprint"]
