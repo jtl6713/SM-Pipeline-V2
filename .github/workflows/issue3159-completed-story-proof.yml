@@ -123,16 +123,16 @@ jobs:
               if not re.fullmatch(r'RECOVERY3159_DRIVE_META=\{.*\}',line): continue
               item=json.loads(line.split('=',1)[1])
               assert set(item)=={'output','identity_matches','trashed','video_mp4','size_bytes','limit_bytes'}
-              assert item['output'] in [11240,11241,11262,11263]
+              assert item['output'] in [11240,11241,11262,11263,11316,11317]
               assert all(type(item[k]) is bool for k in ('identity_matches','video_mp4'))
               assert item['trashed'] is None or type(item['trashed']) is bool
               assert all(type(item[k]) is int and item[k]>=0 for k in ('size_bytes','limit_bytes'))
               print('RECOVERY3159_DRIVE_META='+json.dumps(item,separators=(',',':')))
           for error in errors: print(error)
           if job['status']!='ok': raise SystemExit('protected_media_audit_failed')
-          assert len(lines)==4 and 'RECOVERY3159_COMPLETED_MEDIA=PASS' in out.splitlines(),'audit_receipt_incomplete'
+          assert len(lines)==6 and 'RECOVERY3159_COMPLETED_MEDIA=PASS' in out.splitlines(),'audit_receipt_incomplete'
           receipts=[json.loads(line.split('=',1)[1]) for line in lines]
-          assert sorted(r['output'] for r in receipts)==[11240,11241,11262,11263]
+          assert sorted(r['output'] for r in receipts)==[11240,11241,11262,11263,11316,11317]
           for receipt in receipts:
               assert receipt['canonical_unchanged'] and receipt['queue_retired']
               assert receipt['output_writes']==receipt['provider_writes']==0
