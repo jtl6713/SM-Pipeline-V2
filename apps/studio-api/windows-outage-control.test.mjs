@@ -62,3 +62,17 @@ test("staged production never unblocks publishing or other cron inventory", () =
   assert.doesNotMatch(block,/studioReconcileApprovedPublishes|studioPublicationRecoveryCron|studioDispatchApprovedPublish/);
   assert.match(block,/return;/);
 });
+
+test("stage two restores staggered render and read-only Quality work without publisher admission", () => {
+  const worker=readFileSync(new URL("worker.js",import.meta.url),"utf8");
+  const stage=worker.split('console.info("WINDOWS_OUTAGE_SCHEDULED_ADMISSION_PAUSED");')[1].split("// #2853: verified independent")[0];
+  assert.match(stage,/collectorMinute % 5 === 1[\s\S]*?sweepR4TypedMetadataRecovery\(env, \{ limit: 2 \}\)/);
+  assert.match(stage,/collectorMinute % 5 === 3 && r4CronAdmissionAllowed\([\s\S]*?studioAdmitRenderQueue\(env, \{ limit: 80 \}\)/);
+  assert.match(stage,/collectorMinute % 5 === 4[\s\S]*?runQualityFactoryHandoffCron/);
+  assert.match(stage,/QUALITY_FACTORY_HANDOFF_CRON_DISABLED !== "true"/);
+  assert.match(stage,/sweepSchedulingApprovalPreflight\(env, \{ limit: 2 \}\)/);
+  assert.doesNotMatch(stage,/repair:|canaryRecordId:|studioReconcileApprovedPublishes|studioPublicationRecoveryCron|studioDispatchApprovedPublish|studioReconcileInstagramCarousels|studioReconcileTiktokDrafts/);
+  assert.equal(windowsOutagePublishBlock(resumed+1,resumed,null),"windows_outage_paused");
+  assert.equal(windowsOutageCronInventoryAllowed(["* * * * *"],resumed,null,true),true);
+  assert.equal(windowsOutageCronInventoryAllowed(["*/5 * * * *"],resumed,null,true),false);
+});
