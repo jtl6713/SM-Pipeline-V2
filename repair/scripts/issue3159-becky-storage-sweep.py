@@ -194,7 +194,8 @@ def receipt(row):
 def require_receipt(row):
     r=receipt(row)
     if not r:
-        require(row["render_status"] in ("Blocked","Ready for Render"),"missing_receipt_after_rearm")
+        require(row["render_status"] in ("Blocked","Ready for Render","Waiting in Render Queue")
+            and not row.get("remotion_job_id") and not row.get("final_file_url"),"missing_receipt_after_rearm")
         return
     require(r.get("fingerprint")==FINGERPRINT and r.get("url")==f"https://media.chicagoshining.com/studio/previews/story-voiceover/{PARENT}/{FINGERPRINT}.mp3","receipt_identity")
     require(r.get("state") in ("generating","prepared","verified","failed"),"receipt_state")
