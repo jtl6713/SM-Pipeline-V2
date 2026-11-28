@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { stagedGalleryCandidate,GALLERY_STAGE_CUTOFF } from "./staged-gallery-recovery.mjs";
+import { stagedGalleryCandidate,GALLERY_STAGE_CUTOFF,galleryMarketPrefix } from "./staged-gallery-recovery.mjs";
 const id="rec12345678901234", profile="rec12345678901235";
 const now=GALLERY_STAGE_CUTOFF+600000;
 const fresh=()=>({profileId:profile,profileUuid:"profile-uuid",row:{airtable_record_id:id,content_item_id:"content",platform:"Instagram",platform_output_type:"Instagram Carousel",studio_output_type:"Carousel",render_status:"Native Photo Route",review_status:"Approved",output_status:"Approved for Publishing",publish_status:"Ready to Publish",publish_method:"Automated",do_not_publish:false,auto_publish_enabled:true,scheduled_post_date:new Date(now-1000).toISOString(),studio_scheduled_at:new Date(now-1000).toISOString(),asset_set_revision:"r1"},record:{id,fields:{Platform:"Instagram",Platform_Output_Type:"Instagram Carousel",Review_Status:"Approved",Output_Status:"Approved for Publishing",Publish_Status:"Ready to Publish",Do_Not_Publish:false,Auto_Publish_Enabled:true,Scheduled_Post_Date:new Date(now-1000).toISOString(),Image_Count:4,Assets_Ready_Count:4,Output_Caption:"Verified gallery",IG_Carousel_Status:"Ready for Asset Prep"}}});
@@ -30,4 +30,20 @@ test("Facebook route is exact collage only; held review and conflicting IDs neve
  assert.equal(stagedGalleryCandidate(e,now).stage,"fb0");
  e.row.fb_resolved_publish_mode="Slideshow Reel";assert.equal(stagedGalleryCandidate(e,now).ok,false);
  e.row.fb_resolved_publish_mode="Multi-Photo Collage";e.record.fields.Studio_Render_Review_Hold_Active=true;assert.equal(stagedGalleryCandidate(e,now).ok,false);
+});
+
+test("market resolution rejects contradictory or unidentified destinations",()=>{
+ const record=(market)=>({fields:{Market_Name:market}});
+ assert.equal(galleryMarketPrefix(record(""),record("New York City")),"NYC_");
+ assert.equal(galleryMarketPrefix(record("Miami"),record("New York City")),null);
+ assert.equal(galleryMarketPrefix(record("Unknown")),null);
+ assert.equal(galleryMarketPrefix(record("Chicago")),"");
+});
+test("manual receipt, replacement, active hold or conflicting media cannot enter",()=>{
+ for(const fields of [{Manual_Published_URL:"https://example.org"},{Manual_Fallback_Required:true},{Replace_Transaction_ID:"x"}]){
+  const e=fresh();Object.assign(e.record.fields,fields);assert.equal(stagedGalleryCandidate(e,now).ok,false);
+ }
+ const e=fresh();e.row.publish_hold_reason="hold";assert.equal(stagedGalleryCandidate(e,now).ok,false);
+ const a=fresh(),m=proof(a);a.row.ig_carousel_status="Publishing";a.record.fields.IG_Carousel_Published_Media_ID="123456789";a.record.fields.Platform_Media_ID="987654321";
+ assert.equal(stagedGalleryCandidate(a,now,m).ok,false);
 });
