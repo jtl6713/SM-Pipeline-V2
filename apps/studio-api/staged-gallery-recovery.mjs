@@ -103,7 +103,7 @@ async function claim(bucket,key,data) {
 export function galleryMarketPrefix(...records) {
   const parts=records.map(record=>["Profile_Name","Market_Name","Brand_Name","State_Region","Content_Profile_Name"].map(k=>String(val(record,k)||"")).join(" ").toLowerCase());
   const market=text=>{
-    const hits=[/los angeles|la shining|la -|hollywood|\\bla\\b/.test(text)?"LA_":null,/new york|nyc|manhattan/.test(text)?"NYC_":null,/miami/.test(text)?"MIAMI_":null,/chicago/.test(text)?"":null].filter(x=>x!==null);
+    const hits=[/los angeles|la shining|la -|hollywood|\bla\b/.test(text)?"LA_":null,/new york|nyc|manhattan/.test(text)?"NYC_":null,/miami/.test(text)?"MIAMI_":null,/chicago/.test(text)?"":null].filter(x=>x!==null);
     return hits.length===1?hits[0]:null;
   };
   const profile=market(parts.at(-1)||"");
@@ -150,7 +150,7 @@ export async function verifiedGalleryOwner(env,entry,stage,{fetcher=fetch}={}){
   const account=destination(ig?"INSTAGRAM_BUSINESS_ACCOUNT_ID":"FACEBOOK_PAGE_ID");
   const token=ig?(destination("META_GRAPH_API_ACCESS_TOKEN")||destination("FACEBOOK_PAGE_ACCESS_TOKEN")):destination("FACEBOOK_PAGE_ACCESS_TOKEN");
   const declared=String(val(profile,ig?"Instagram_Business_Account_ID":"Facebook_Page_ID")||"").trim();
-  if(!/^\\d{6,35}$/.test(account)||!token||!/^v\\d{1,2}\\.\\d$/.test(version)||declared&&declared!==account)return null;
+  if(!/^\d{6,35}$/.test(account)||!token||!/^v\d{1,2}\.\d$/.test(version)||declared&&declared!==account)return null;
   const cfg={account,token,version};
   const owner=await graphGet(cfg,ig?account:"me","id",fetcher);
   if(String(owner?.id||"")!==account)return null;
@@ -175,7 +175,7 @@ async function currentReservation(env,entry){
   const lane=await readScheduleReservationLane(env,{content_profile_id:entry.profileId,platform:entry.row.platform});
   if(!lane||lane.bypass||lane.quarantine||!Array.isArray(lane.recent_reservations))return false;
   const hits=lane.recent_reservations.filter(x=>x.platform_output_record_id===entry.record.id);
-  return hits.length===1&&hits[0].state==="Committed"&&ms(hits[0].scheduled_iso)===ms(entry.row.scheduled_post_date);
+  return hits.length===1&&Number.isFinite(ms(hits[0].committed_timestamp))&&ms(hits[0].committed_timestamp)<=Date.now()&&ms(hits[0].scheduled_iso)===ms(entry.row.scheduled_post_date);
 }
 export async function runStagedGalleryRecovery(env,{now=Date.now,scheduledTime=null,verifyOwner=(entry,stage)=>verifiedGalleryOwner(env,entry,stage),verifyReservation=entry=>currentReservation(env,entry),rest=(path,opts)=>supabaseRest(env,path,opts),
   read=async id=>(await factorySupabaseApprovalRows(env,[id])).get(id),
