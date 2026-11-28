@@ -238,7 +238,8 @@ def test_cache_only_never_regenerates_missing_or_mismatched_story(monkeypatch,st
     client.update_record.assert_not_called()
 
 
-def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
+@pytest.mark.parametrize('verified_cache_error', [False, True])
+def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch, verified_cache_error):
     import hashlib
     from copy import deepcopy
     from contextlib import nullcontext
@@ -254,6 +255,17 @@ def test_cache_only_rearm_verified_bytes_without_paid_generation(monkeypatch):
         Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
         Composition_ID="Story", Render_Clip_List_JSON='[{"durationFrames":300}]',
         Studio_Story_Voiceover_Receipt_JSON=json.dumps({"fingerprint":digest,"state":"failed","url":url,"sha256":hashlib.sha256(data).hexdigest()}))
+    if verified_cache_error:
+        row["fields"]["Remotion_Error_Message"]=story.STORY_VERIFIED_CACHE_ERROR
+        claim=json.loads(row["fields"][story.RECEIPT])
+        claim["state"]="verified"
+        row["fields"][story.RECEIPT]=json.dumps(claim)
+        assert story.story_sentence_recovery_candidate(row,p,cached_only=True)
+        bad=deepcopy(row)
+        claim.pop("sha256")
+        bad["fields"][story.RECEIPT]=json.dumps(claim)
+        assert not story.story_sentence_recovery_candidate(bad,p,cached_only=True)
+        assert not story.story_sentence_recovery_candidate(row,p,cached_only=False)
     rows={p["id"]:p,row["id"]:row}
     class Client:
         def get_record(self,table,rid):
@@ -441,3 +453,64 @@ def test_storage_guard_recovery_requires_exact_absence_or_verified_cache(monkeyp
     else:
         assert client.update_record.call_count == 1
         assert rows[row["id"]]["fields"]["Do_Not_Publish"] is False
+
+
+def exact_3159_context():
+    p = parent()
+    p["id"] = "rec9qS53G7HDoyCL5"
+    ids = ["recmeqaimrNohhz3y", "recXKsz1oxOy8ooUn", "recgtoz6TcTHKgg00",
+           "recVBua7DyEmUQs8X", "reccgtEdV1EKo4Hlp"]
+    rows = [
+        {"id": ident, "fields": {
+            "Output_Status": "Approved for Publishing", "Review_Status": "Approved",
+            "Render_Status": "Rendered", "Final_File_URL": "https://example.test/approved.mp4",
+            "Studio_Output_Type": "Reel", "Aspect_Ratio": "9:16",
+            "Voiceover_URL": "https://example.test/full.mp3",
+            "Composition_ID": "ChicagoShiningPhotoSequence",
+            "Render_Clip_List_JSON": '[{"url":"https://example.test/image.jpg","durationFrames":1164}]',
+            "Auto_Publish_Enabled": True, "Scheduled_Post_Date": "2026-12-06T04:06:00Z",
+        }} for ident in ids
+    ]
+    digest = "0454c4863049a512c784d2964e74a587387baa5665a2753a1bb8f5b3c501c18d"
+    sha = "e6d305b08797e5c83f5ee30104384e702573cfe0d352a8a078f6eee6df1982fb"
+    url = f"https://media.chicagoshining.com/studio/previews/story-voiceover/{p['id']}/{digest}.mp3"
+    target = output(Content_Item=[p["id"]], Output_Status="Ready for Review",
+        Render_Status="Rendered", Final_File_URL="https://example.test/story.mp4",
+        Do_Not_Publish=True, Auto_Publish_Enabled=False, Publish_Status="Not Ready",
+        Studio_Story_Voiceover_Receipt_JSON=json.dumps({"fingerprint":digest,"sha256":sha,"state":"verified","url":url}))
+    target["id"] = "recoheiAMq2vG48V3"
+    rows.append(target)
+    return {"request_id":"recEDPsqJlxaGHCyO","request":{"fields":{}},
+            "job":{"job_id":"spj-854f9cd1bdf8","route":"photo:scripted"},
+            "parent":p,"outputs":rows}
+
+
+def test_exact_3159_completed_story_does_not_propagate_into_approved_siblings(monkeypatch):
+    from copy import deepcopy
+    from studio_produce import steps
+    ctx = exact_3159_context()
+    before = deepcopy(ctx["outputs"])
+    by_id = {r["id"]:r for r in before}
+    client = Mock()
+    client.get_record.side_effect = lambda table, ident: deepcopy(by_id[ident])
+    monkeypatch.setattr(steps, "_output_missing_review_cover", lambda row: False)
+    assert steps._verified_story_recovery_scope(ctx) == "recoheiAMq2vG48V3"
+    assert steps.step_render(client, ctx) == "done"
+    client.update_record.assert_not_called()
+    assert ctx["outputs"] == before
+
+
+@pytest.mark.parametrize("drift", ["hold","sibling_approval","receipt","sibling_cover"])
+def test_exact_3159_story_recovery_fails_closed_on_scope_drift(monkeypatch, drift):
+    from studio_produce import steps
+    ctx = exact_3159_context()
+    monkeypatch.setattr(steps, "_output_missing_review_cover",
+                        lambda row: drift == "sibling_cover" and row["id"] == "recmeqaimrNohhz3y")
+    if drift == "hold":
+        ctx["outputs"][-1]["fields"]["Do_Not_Publish"] = False
+    elif drift == "sibling_approval":
+        ctx["outputs"][0]["fields"]["Review_Status"] = "Pending Review"
+    elif drift == "receipt":
+        ctx["outputs"][-1]["fields"][story.RECEIPT] = "{}"
+    with pytest.raises(steps.StepBlocked):
+        steps._verified_story_recovery_scope(ctx)

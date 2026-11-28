@@ -39,11 +39,15 @@ test("Worker health advertises airtable burn-kill cron build", () => {
 });
 
 test("production Worker keeps five-minute Studio cron and isolates Factory one-minute recovery", () => {
-  assert.match(
-    deployWorkflow,
-    /'triggers':\{'crons':\['\*\/5 \* \* \* \*', '0 6 \* \* \*', '\* \* \* \* \*'\]\}/
-  );
-  assert.doesNotMatch(deployWorkflow, /'crons':\['\*\/2 \* \* \* \*'\]/);
+  // #3159: a normal release must preserve the actual scheduler inventory,
+  // including an intentional empty set during outage containment. Routing
+  // assertions below still test the one-minute and five-minute behaviors.
+  assert.match(deployWorkflow, /crons=schedules\(call\('GET'\)\)/);
+  assert.ok(deployWorkflow.includes("'triggers':{'crons':json.loads(Path('/tmp/production-crons-before.json').read_text())}"));
+  assert.ok(deployWorkflow.includes("true) jq -e '. == []' /tmp/production-crons-before.json"));
+  assert.ok(deployWorkflow.includes("if schedules(call('GET')) != expected or config['triggers']['crons'] != expected:"));
+  assert.ok(deployWorkflow.includes("if observed != expected:"));
+  assert.doesNotMatch(deployWorkflow, /'crons':\s*\[/);
   const scheduled = scheduledBody();
   const isolated = scheduled.indexOf('String(event?.cron || "").trim() === "* * * * *"');
   const heavy = scheduled.indexOf("const cronInstant");

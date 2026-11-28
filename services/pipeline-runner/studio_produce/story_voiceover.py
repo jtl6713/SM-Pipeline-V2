@@ -72,7 +72,11 @@ STORY_MISSING_SENTENCE = "Studio Story narration integrity guard: Story needs a 
 STORY_STORAGE_GUARD = "Studio Story narration integrity guard: Story narration storage existence not safely resolved"
 
 
+STORY_VERIFIED_CACHE_ERROR = "Studio Story narration integrity guard: Story narration cache unavailable; refuse duplicate paid attempt"
+
+
 STORY_CACHE_ERRORS = {
+    STORY_VERIFIED_CACHE_ERROR,
     "Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt",
     "Studio Story narration integrity guard: Story narration attempt already recorded on a sibling; reconcile before retrying paid generation",
 }
@@ -125,6 +129,16 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
             or not field_str(output, "Composition_ID")
             or not field_str(output, "Render_Clip_List_JSON")):
         return False
+    if field_str(output, "Remotion_Error_Message") == STORY_VERIFIED_CACHE_ERROR:
+        # This failure is retryable only from its own persisted, verified
+        # immutable byte receipt. Never fall through to paid/history recovery.
+        receipt = parse_json_field(field(output, RECEIPT)) or {}
+        if (not cached_only or not isinstance(receipt, dict)
+                or receipt.get("state") != "verified"
+                or not re.fullmatch(r"[a-f0-9]{64}", str(receipt.get("sha256") or ""))
+                or not re.fullmatch(r"[a-f0-9]{64}", str(receipt.get("fingerprint") or ""))
+                or receipt.get("url") != f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent['id']}/{receipt.get('fingerprint')}.mp3"):
+            return False
     try:
         exact_story_snapshot(output, parent["id"])
         story_seconds(output)
@@ -299,6 +313,17 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
         from studio_produce.story_history_recovery import HISTORY_RECOVERY, download_audited_history
         history = HISTORY_RECOVERY.get(parent["id"])
         provenance = {}
+        if (field_str(current, "Remotion_Error_Message") == STORY_VERIFIED_CACHE_ERROR
+                or (current["id"] == "recoheiAMq2vG48V3" and live_parent["id"] == "rec9qS53G7HDoyCL5"
+                    and field(current, "Do_Not_Publish") is True)):
+            # Also enforce the exact held probe after rearm, when R4 may
+            # clear the original error label before checking narration.
+            own = parse_json_field(field(current, RECEIPT)) or {}
+            if (not isinstance(own, dict) or own.get("state") != "verified"
+                    or own.get("fingerprint") != digest or own.get("url") != url
+                    or known != {own.get("sha256")}
+                    or not re.fullmatch(r"[a-f0-9]{64}", str(own.get("sha256") or ""))):
+                raise StoryVoiceoverError("Story verified cache receipt changed; no regeneration")
         if claims:
             if not known and history and current["id"] in history["outputs"]:
                 # Only explicitly audited exact pairs, their original failed

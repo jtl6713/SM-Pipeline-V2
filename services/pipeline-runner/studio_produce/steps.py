@@ -1142,6 +1142,52 @@ def waiting_on_existing_render_job(output: dict[str, Any]) -> bool:
     )
 
 
+def _verified_story_recovery_scope(ctx: dict[str, Any]) -> str | None:
+    """Exact #3159 probe: render only the held Story, not approved siblings.
+
+    The existing parent job remains the canonical, governed unit. Preserve
+    finished sibling packages and their schedules while proving its render
+    step can genuinely complete. Do not widen to a different revision.
+    """
+    if (ctx.get("request_id") != "recEDPsqJlxaGHCyO"
+            or (ctx.get("job") or {}).get("job_id") != "spj-854f9cd1bdf8"):
+        return None
+    target = "recoheiAMq2vG48V3"
+    rows = {row["id"]: row for row in ctx.get("outputs") or []}
+    row = rows.get(target)
+    if not row or field(row, "Do_Not_Publish") is not True:
+        raise StepBlocked("Exact held Story recovery hold or identity changed")
+    from studio_produce.story_voiceover import RECEIPT, needs_story_voiceover
+    from render.fields import parse_json_field
+    receipt = parse_json_field(field(row, RECEIPT)) or {}
+    expected = {"recmeqaimrNohhz3y", "recXKsz1oxOy8ooUn", "recgtoz6TcTHKgg00",
+                "recVBua7DyEmUQs8X", "reccgtEdV1EKo4Hlp", target}
+    if (set(rows) != expected or len(ctx.get("outputs") or []) != 6
+            or (ctx.get("parent") or {}).get("id") != "rec9qS53G7HDoyCL5"
+            or (ctx.get("job") or {}).get("job_id") != "spj-854f9cd1bdf8"
+            or not needs_story_voiceover(row)
+            or not isinstance(receipt, dict) or receipt.get("state") != "verified"
+            or receipt.get("fingerprint") != "0454c4863049a512c784d2964e74a587387baa5665a2753a1bb8f5b3c501c18d"
+            or receipt.get("sha256") != "e6d305b08797e5c83f5ee30104384e702573cfe0d352a8a078f6eee6df1982fb"
+            or field(row, "Auto_Publish_Enabled") is not False
+            or field_str(row, "Review_Status") == "Approved"
+            or field_str(row, "Output_Status") not in {"In Production", "Ready for Review"}
+            or field_str(row, "Render_Status") not in {"Blocked", "Ready for Render", "Waiting in Render Queue", "Rendering", "Rendered"}
+            or any(field_str(row, key) for key in (
+                "Scheduled_Post_Date", "Studio_Scheduled_At", "YouTube_Scheduled_Publish_At",
+                "Production_Approved_At", "Published_At", "Platform_Post_URL",
+                "Platform_Post_ID", "Platform_Media_ID", "Publish_Started_At",
+                "Studio_Publish_Dispatch_At", "Publish_Locked_At"))
+            or not field_str(ctx.get("parent") or {}, "Voiceover_URL")
+            or any(not _output_file_ready(sibling)
+                   or field_str(sibling, "Output_Status") != "Approved for Publishing"
+                   or field_str(sibling, "Review_Status") != "Approved"
+                   or _output_missing_review_cover(sibling)
+                   for ident, sibling in rows.items() if ident != target)):
+        raise StepBlocked("Exact held Story recovery identity or approved sibling package changed")
+    return target
+
+
 def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     if is_finished(ctx):
         return "done"
@@ -1168,11 +1214,13 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                 "then resume production. Do not reuse the same still or bypass "
                 "the visual-integrity guard."
             )
+    exact_story = _verified_story_recovery_scope(ctx)
     if voiceover_missing(ctx["request"], ctx.get("parent")):
         # R4 refuses to start without narration. Generate it here instead of
         # looping on "Rendering 0/N" with no Remotion job.
         run_voiceover_p2(client, ctx)
-    copy_voiceover_to_outputs(client, ctx.get("parent") or {}, ctx["outputs"])
+    render_rows = [row for row in ctx["outputs"] if not exact_story or row["id"] == exact_story]
+    copy_voiceover_to_outputs(client, ctx.get("parent") or {}, render_rows)
     from studio_produce.shared_render import (
         build_shared_render_plan,
         propagate_render_result,
@@ -1180,8 +1228,8 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     )
 
     test_run_id = field_str(ctx["request"], "Test_Run_ID") or None
-    shared_plan = build_shared_render_plan(ctx["outputs"])
-    ordered_outputs = sort_outputs_for_shared_render(ctx["outputs"], shared_plan)
+    shared_plan = build_shared_render_plan(render_rows)
+    ordered_outputs = sort_outputs_for_shared_render(render_rows, shared_plan)
     remaining = []
     transient = False
     started_r4 = False
@@ -1232,7 +1280,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                         propagate_render_result(client, harvested, meta["sibling_ids"])
                     continue
                 if field_str(harvested, "Render_Status").lower() == "failed":
-                    if _is_delay_render_failure(harvested):
+                    if not exact_story and _is_delay_render_failure(harvested):
                         _requeue_failed_render(client, harvested["id"])
                         remaining.append(harvested["id"])
                         continue
@@ -1258,7 +1306,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
             # Failed + Remotion_Job_ID usually means harvest timed out after Remotion
             # already finished — keep polling R5 instead of abandoning the package.
             if render_status.lower() in {"rendering", "failed"} and field_str(fresh, "Remotion_Job_ID"):
-                if render_status.lower() == "failed" and _is_delay_render_failure(fresh):
+                if not exact_story and render_status.lower() == "failed" and _is_delay_render_failure(fresh):
                     _requeue_failed_render(client, fresh["id"])
                     remaining.append(fresh["id"])
                     continue
@@ -1268,7 +1316,7 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
                     if meta.get("role") == "canonical" and meta.get("sibling_ids"):
                         propagate_render_result(client, harvested, meta["sibling_ids"])
                     continue
-                if field_str(harvested, "Render_Status").lower() == "failed" and _is_delay_render_failure(harvested):
+                if not exact_story and field_str(harvested, "Render_Status").lower() == "failed" and _is_delay_render_failure(harvested):
                     _requeue_failed_render(client, harvested["id"])
                     remaining.append(harvested["id"])
                     continue
@@ -1357,7 +1405,9 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
     ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
     # Rebuild after T1/R5 mutations so a Pending YouTube Short that was solo at
     # plan time can still inherit the Instagram Final_File_URL.
-    shared_plan = build_shared_render_plan(ctx["outputs"])
+    if exact_story and _verified_story_recovery_scope(ctx) != exact_story:
+        raise StepBlocked("Exact held Story recovery scope changed")
+    shared_plan = build_shared_render_plan([row for row in ctx["outputs"] if not exact_story or row["id"] == exact_story])
     for output in ctx["outputs"]:
         meta = shared_plan.get(output["id"]) or {}
         if meta.get("role") != "sibling" or _output_ready(output):
@@ -1367,6 +1417,8 @@ def step_render(client: AirtableClient, ctx: dict[str, Any]) -> str:
             propagate_render_result(client, canonical, [output["id"]])
     ctx["outputs"] = [client.get_record(PLATFORM_OUTPUTS_TABLE, row["id"]) for row in ctx["outputs"]]
     if all(_output_file_ready(row) for row in ctx["outputs"]):
+        if exact_story and any(_output_missing_review_cover(row) for row in ctx["outputs"]):
+            raise StepBlocked("Exact Story recovery cannot rewrite approved sibling covers")
         if any(_output_missing_review_cover(row) for row in ctx["outputs"]) and ctx.get("parent"):
             from studio_produce.thumbnail import ensure_platform_thumbnails
 
