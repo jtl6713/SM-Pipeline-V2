@@ -1,3 +1,5 @@
+import { runNycGalleryScheduleRepair } from "./nyc-gallery-mae-repair.mjs";
+import { studioScheduleHorizonDays as nycGalleryScheduleHorizonDays } from "./worker-functions-02.mjs";
 import { runStagedGalleryRecovery } from "./staged-gallery-recovery.mjs";
 import { windowsOutageState, windowsOutageProductionPaused } from "./windows-outage-control.mjs";
 import { exactZooFactoryDrain } from "./issue3093-exact-factory-drain.mjs";
@@ -4784,6 +4786,11 @@ export default {
         // metadata repair, render admission and read-only QA across separate
         // minute slots; retain the existing single Remotion slot and broker.
         if (collectorMinute % 5 === 1) {
+          ctx.waitUntil((async()=>{
+            if(env.STUDIO_3159_GALLERY_DISABLED==="true")return;
+            const result=await runNycGalleryScheduleRepair(env,{horizonDays:await nycGalleryScheduleHorizonDays(env)});
+            console.info("3159 exact NYC MAE repair",JSON.stringify(result));
+          })().catch(()=>console.warn("3159 exact NYC MAE repair deferred; no replay")));
           ctx.waitUntil(sweepR4TypedMetadataRecovery(env, { limit: 2 })
             .then(result => console.info("3159 staged R4 metadata", JSON.stringify(result)))
             .catch(error => console.warn("3159 staged R4 metadata unavailable", String(error?.message || error))));
