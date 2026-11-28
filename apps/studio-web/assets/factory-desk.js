@@ -1895,9 +1895,10 @@
       inspect.setAttribute("aria-expanded", String(state.batchDetailsOpen));
     }
     if (retry) {
-      retry.hidden = listCollapsed || !(latest?.failed_count > 0 && latest?.can_retry);
+      const resume = factoryPendingGroupResumePayload(latest);
+      retry.hidden = listCollapsed || !(resume || (latest?.failed_count > 0 && latest?.can_retry));
       retry.disabled = state.submittingBatch;
-      retry.textContent = state.submittingBatch ? "Checking retry…" : "Retry Failed";
+      retry.textContent = state.submittingBatch ? "Checking request…" : resume ? "Resume Pending" : "Retry Failed";
     }
     details.hidden = listCollapsed || !state.batchDetailsOpen || !latest;
     const items = Array.isArray(latest?.items) ? latest.items : [];
@@ -3074,6 +3075,44 @@
     }
   }
 
+  // Reuse only the existing durable group and its complete original identity set.
+  // Never create a new group from the remaining items or from browser selection.
+  function factoryPendingGroupResumePayload(batch) {
+    if (!batch?.group || batch.preview_only || !(Number(batch.pending_count) > 0) ||
+        !/^[A-Za-z0-9_-]{12,128}$/.test(String(batch.request_id || "")) ||
+        !Array.isArray(batch.items)) return null;
+    const ids = batch.items.map(item => item.id);
+    if (ids.length < 1 || ids.length > 20 || ids.length !== Number(batch.total) ||
+        new Set(ids).size !== ids.length || ids.some(id => !/^rec[A-Za-z0-9]+$/.test(String(id || "")))) return null;
+    return { action: "start_group", request_id: batch.request_id, record_ids: ids };
+  }
+
+  async function resumeFactoryPendingGroup(batch, payload, viewed) {
+    state.inspectedBatchKey = batch.job_id;
+    state.batchDetailsOpen = true;
+    state.submittingBatch = true;
+    state.retryBatchNotice = {job_id:batch.job_id,message:"Resuming the original approval request; completed approvals remain unchanged."};
+    renderFactoryBatchActivity(viewed);
+    updateFactoryBatchToolbar();
+    try {
+      const result = await fetchJson("/api/factory/approval-batches", {
+        method:"POST", body:JSON.stringify(payload),
+      });
+      if (result.accepted !== true || result.already_submitted !== true || result.request_id !== payload.request_id) {
+        throw new Error("Original batch resume was not confirmed");
+      }
+      state.retryBatchNotice = {job_id:batch.job_id,message:"Original batch resume accepted. Waiting for verified progress; no new approval group was created."};
+      setStatus(state.retryBatchNotice.message);
+    } catch (error) {
+      state.retryBatchNotice = {job_id:batch.job_id,message:"Resume not confirmed: " + (error.message || error) + ". Refresh Activity to check the original request."};
+      setStatus(state.retryBatchNotice.message,true);
+    } finally {
+      state.submittingBatch = false;
+      await refreshFactoryBatchActivity(true);
+      updateFactoryBatchToolbar();
+    }
+  }
+
   async function retryFactoryBatchFailures() {
     const viewed = state.completedOpen ? state.completedBatch : state.batch;
     const batches = Array.isArray(viewed?.batches) ? viewed.batches : (viewed?.job_id ? [viewed] : []);
@@ -3082,6 +3121,8 @@
     // must use that same visible batch, not the first active-snapshot row.
     const batch = selected || batches[0] || null;
     if (state.submittingBatch) return;
+    const resume = factoryPendingGroupResumePayload(batch);
+    if (resume) return resumeFactoryPendingGroup(batch, resume, viewed);
     if (!batch?.job_id || !batch.can_retry) {
       setStatus("Select the batch showing failed outputs, then retry. No approvals were resubmitted.", true);
       return;

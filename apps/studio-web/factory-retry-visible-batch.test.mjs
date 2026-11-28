@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "assets/factory-desk.js"), "utf8");
-const start = source.indexOf("  async function retryFactoryBatchFailures()");
+const start = source.indexOf("  function factoryPendingGroupResumePayload(batch)");
 const end = source.indexOf("  function renderCard(", start);
 assert.ok(start >= 0 && end > start, "retry function is present");
 const code = source.slice(start, end);
@@ -21,6 +21,8 @@ function harness({ completedOpen, inspectedBatchKey, active, completed }) {
     state,
     fetchJson: async (url, options) => {
       calls.push({url, payload: JSON.parse(options.body)});
+      const payload=JSON.parse(options.body);
+      if(payload.action==="start_group")return {job_id:"group-pending",accepted:true,already_submitted:true,request_id:payload.request_id};
       return {job_id:"group-failed",accepted:true,message:"Retry started"};
     },
     setStatus: message => calls.push({message}),
@@ -56,4 +58,16 @@ test("Retry Failed with no explicit selection uses the visible first row", async
     active:{batches:[failed,pending]},completed:{batches:[]}});
   await h.retry();
   assert.equal(h.calls.find(x=>x.payload).payload.request_id,"failed");
+});
+
+
+test("Resume Pending reuses the original accepted group and all its IDs", async () => {
+  const original={job_id:"group-pending",request_id:"original-batch-123",group:true,can_retry:false,total:2,pending_count:1,items:[{id:"recApproved",status:"approved"},{id:"recPending",status:"queued"}]};
+  const h=harness({completedOpen:false,inspectedBatchKey:"group-pending",active:{batches:[original,failed]},completed:{batches:[]}});
+  await h.retry();
+  const calls=h.calls.filter(x=>x.payload);
+  assert.equal(calls.length,1);
+  assert.deepEqual(calls[0].payload,{action:"start_group",request_id:"original-batch-123",record_ids:["recApproved","recPending"]});
+  assert.match(h.calls.find(x=>x.message)?.message,/Original batch resume accepted/);
+  assert.equal(h.state.submittingBatch,false);
 });
