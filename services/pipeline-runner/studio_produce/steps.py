@@ -1244,6 +1244,9 @@ def _exact_3159_history_scope(ctx):
 # Exact held storage cohort from protected inventory 46161305343. Only the
 # two unfinished Stories may enter rendering; completed siblings are read-only.
 _EXACT_3159_STORAGE_SCOPES = {
+    "recB4H2MSi6b0zhqz": ("spj-240011e02b18", "rec98yS7Pl7tAAqih",
+        {"recZVRMvmIYwTwKTd", "recvUWDcO2Y2L0MK1"},
+        {"recazCj6ItHH0TuOl", "recXN5AI6V4kQ98Xo", "recqHtw90LTcFhXfJ", "recPRFkZmeQ3FvLOi"}),
     "recLprSXgeNbgKABG": ("spj-b8cba2008c3b", "recbjg7rXQCiA6DzY",
         {"recONsGlBKsE8VTdP", "recKwClsbFCOJaKbC"},
         {"recDpIhU2YQzjNX8a", "recXr2l859AnZkK1f", "recEyaTmyn4m2YBzg", "recvLW8Slruf38vHE"}),
@@ -1273,7 +1276,7 @@ _EXACT_3159_STORAGE_SCOPES = {
 
 def _exact_3159_storage_scope(ctx):
     from studio_produce.story_voiceover import (
-        HELD_STORAGE_RECOVERY, RECEIPT, STORY_STORAGE_GUARD,
+        HELD_STORAGE_RECOVERY, RECEIPT, storage_recovery_error,
         held_storage_identity, needs_story_voiceover,
     )
     from render.fields import parse_json_field
@@ -1299,7 +1302,7 @@ def _exact_3159_storage_scope(ctx):
                 or not held_storage_identity(row, parent)
                 or field_str(row, "Output_Status") not in {"In Production", "Ready for Review"}
                 or state not in {"Blocked", "Ready for Render", "Waiting in Render Queue", "Rendering", "Rendered"}
-                or (state == "Blocked" and field_str(row, "Remotion_Error_Message") != STORY_STORAGE_GUARD)
+                or (state == "Blocked" and field_str(row, "Remotion_Error_Message") != storage_recovery_error(row))
                 or not isinstance(receipt, dict)
                 or (receipt and (receipt.get("fingerprint") != mapped[1]
                     or receipt.get("url") != f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent_id}/{mapped[1]}.mp3"

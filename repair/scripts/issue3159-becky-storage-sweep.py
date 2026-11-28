@@ -151,6 +151,23 @@ COHORT = [
             "reccS9JI9e5j0nKUp"
         ],
         "fingerprint": "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"
+    },
+    {
+        "request": "recB4H2MSi6b0zhqz",
+        "parent": "rec98yS7Pl7tAAqih",
+        "job": "spj-240011e02b18",
+        "name": "PR-20261125015505-9BADWW",
+        "stories": {
+            "recZVRMvmIYwTwKTd": 11226,
+            "recvUWDcO2Y2L0MK1": 11227
+        },
+        "siblings": [
+            "recazCj6ItHH0TuOl",
+            "recXN5AI6V4kQ98Xo",
+            "recqHtw90LTcFhXfJ",
+            "recPRFkZmeQ3FvLOi"
+        ],
+        "fingerprint": "409cd89bc52e929c6dbd57d0f11d2acfa1673446ccb7ddc03c4d448e4ac7a9b6"
     }
 ]
 REQUEST = PARENT = JOB = FINGERPRINT = NAME = None
@@ -177,7 +194,8 @@ def receipt(row):
 def require_receipt(row):
     r=receipt(row)
     if not r:
-        require(row["render_status"] in ("Blocked","Ready for Render"),"missing_receipt_after_rearm")
+        require(row["render_status"] in ("Blocked","Ready for Render","Waiting in Render Queue")
+            and not row.get("remotion_job_id") and not row.get("final_file_url"),"missing_receipt_after_rearm")
         return
     require(r.get("fingerprint")==FINGERPRINT and r.get("url")==f"https://media.chicagoshining.com/studio/previews/story-voiceover/{PARENT}/{FINGERPRINT}.mp3","receipt_identity")
     require(r.get("state") in ("generating","prepared","verified","failed"),"receipt_state")
@@ -291,7 +309,7 @@ def recover(candidate):
     if any(before[i].get(k) for i in PAIR for k in ("scheduled_post_date","studio_scheduled_at","youtube_scheduled_publish_at","published_at","platform_post_url","production_approved_at")) or any(before[i]["publish_status"]!="Not Ready" for i in PAIR):
         return False
     require(all(not receipt(before[i]) for i in PAIR),"unexpected_prior_narration_receipt")
-    require(all((before[i].get("error_messages") or {}).get("Remotion_Error_Message")=="Studio Story narration integrity guard: Story narration storage existence not safely resolved" for i in PAIR),"storage_guard_changed")
+    require(all((before[i].get("error_messages") or {}).get("Remotion_Error_Message")==("Studio Story narration integrity guard: Story needs a complete concise narration sentence" if 11226 in PAIR.values() else "Studio Story narration integrity guard: Story narration storage existence not safely resolved") for i in PAIR),"storage_guard_changed")
     require(job()["step"]=="render","job_step_changed")
     for ident in PAIR:
         target=before[ident]
@@ -368,7 +386,7 @@ def recover(candidate):
 
 def main():
     global PHASE
-    require(len(COHORT)==8 and len({x["request"] for x in COHORT})==8,"cohort_identity")
+    require(len(COHORT)==9 and len({x["request"] for x in COHORT})==9,"cohort_identity")
     require((BASE/".env").is_file(),"runner_env_missing")
     load_dotenv(BASE/".env",override=False)
     path=Path(os.environ["STUDIO_GOVERNOR_DB_PATH"])

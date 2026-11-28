@@ -130,6 +130,8 @@ HELD_CACHE_RECOVERY = {
 # A prior absence is NOT a current storage authorization. Normal R4 repeats
 # exact live absence and the durable sibling claim before its first paid call.
 HELD_STORAGE_RECOVERY = {
+    "recZVRMvmIYwTwKTd": ("rec98yS7Pl7tAAqih", "409cd89bc52e929c6dbd57d0f11d2acfa1673446ccb7ddc03c4d448e4ac7a9b6"),
+    "recvUWDcO2Y2L0MK1": ("rec98yS7Pl7tAAqih", "409cd89bc52e929c6dbd57d0f11d2acfa1673446ccb7ddc03c4d448e4ac7a9b6"),
     "recONsGlBKsE8VTdP": ("recbjg7rXQCiA6DzY", "1aae9a3cef8cc1fefb95b70155656760dc993e3252d348f746d94d50dedea852"),
     "recKwClsbFCOJaKbC": ("recbjg7rXQCiA6DzY", "1aae9a3cef8cc1fefb95b70155656760dc993e3252d348f746d94d50dedea852"),
     "receOfwtyngfyCboh": ("rec0gE5IoTuSoqy5E", "cae8fcf0c3e661c0ba84af5bde37630b8ca97b0d6fdf28e5edad6c8352ee9cc7"),
@@ -147,6 +149,28 @@ HELD_STORAGE_RECOVERY = {
     "recBOQEGqk0lgF4HF": ("recs0vBdT1jmUIWL0", "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"),
     "reckFi5S3Ynrxxggl": ("recs0vBdT1jmUIWL0", "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"),
 }
+
+
+# Exact complete independent opening clause of current parent script; only
+# these two unapproved companion Stories receive this shorter narration.
+_CONCISE_3159_IDS = {"recZVRMvmIYwTwKTd", "recvUWDcO2Y2L0MK1"}
+_CONCISE_3159_SOURCE = "Make the most of a CTA day pass and roam Chicago—bounce between neighborhoods, grab bites, and catch skyline views, all on one ticket 🚇 Save this for your next city day and drop your favorite stop in the comments."
+_CONCISE_3159_TEXT = "Make the most of a CTA day pass and roam Chicago."
+
+
+def story_text_for_output(output, parent):
+    source = field_str(parent, "Voiceover_Script")
+    if output.get("id") in _CONCISE_3159_IDS:
+        if parent.get("id") != "rec98yS7Pl7tAAqih" or source.strip() != _CONCISE_3159_SOURCE:
+            raise StoryVoiceoverError("Audited concise Story source revision changed")
+        return _CONCISE_3159_TEXT
+    return story_text(source)
+
+
+def storage_recovery_error(output):
+    if output.get("id") in _CONCISE_3159_IDS:
+        return STORY_MISSING_SENTENCE
+    return STORY_STORAGE_GUARD
 
 
 def held_storage_identity(output, parent):
@@ -182,7 +206,7 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
                 and not (cached_only and field(output, "Do_Not_Publish") is True
                          and HELD_CACHE_RECOVERY.get(output.get("id")) == parent.get("id")
                          and field(output, "Auto_Publish_Enabled") is False)
-                and not (not cached_only and field_str(output, "Remotion_Error_Message") == STORY_STORAGE_GUARD
+                and not (not cached_only and field_str(output, "Remotion_Error_Message") == storage_recovery_error(output)
                          and held_storage_identity(output, parent)))
             or field(output, "Auto_Publish_Enabled") not in (None, False)
             or (not cached_only and field_str(output, RECEIPT))
@@ -212,7 +236,7 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
     try:
         exact_story_snapshot(output, parent["id"])
         story_seconds(output)
-        story_text(field_str(parent, "Voiceover_Script"))
+        story_text_for_output(output, parent)
     except StoryVoiceoverError:
         return False
     return True
@@ -229,7 +253,7 @@ def storage_guard_clear(client, output, parent):
     try:
         cap = story_seconds(output)
         voice = resolve_content_voice_id(parent)
-        digest = fingerprint(parent["id"], voice, story_text(field_str(parent, "Voiceover_Script")), cap)
+        digest = fingerprint(parent["id"], voice, story_text_for_output(output, parent), cap)
         if output.get("id") in HELD_STORAGE_RECOVERY and (
                 not held_storage_identity(output, parent)
                 or HELD_STORAGE_RECOVERY[output["id"]] != (parent["id"], digest)):
@@ -240,10 +264,10 @@ def storage_guard_clear(client, output, parent):
             current = client.get_record(PLATFORM_OUTPUTS_TABLE, output["id"])
             live_parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
             if (not story_sentence_recovery_candidate(current, live_parent)
-                    or field_str(current, "Remotion_Error_Message") != STORY_STORAGE_GUARD
+                    or field_str(current, "Remotion_Error_Message") != storage_recovery_error(current)
                     or exact_story_snapshot(current, parent["id"]) != exact_story_snapshot(output, parent["id"])
                     or fingerprint(parent["id"], resolve_content_voice_id(live_parent),
-                        story_text(field_str(live_parent, "Voiceover_Script")), story_seconds(current)) != digest):
+                        story_text_for_output(current, live_parent), story_seconds(current)) != digest):
                 return False
             claims = matching_story_claims(client, live_parent, current["id"], digest, url)
             storage = R2UploadClient(pipeline_settings(client))
@@ -271,9 +295,11 @@ def rearm_story_sentence_guard(client, output, parent):
     live_parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
     if (not story_sentence_recovery_candidate(current, live_parent, cached_only=cached_only)
             or exact_story_snapshot(current, parent["id"]) != exact_story_snapshot(output, parent["id"])
-            or story_text(field_str(live_parent, "Voiceover_Script")) != story_text(field_str(parent, "Voiceover_Script"))):
+            or story_text_for_output(current, live_parent) != story_text_for_output(output, parent)):
         return current
-    if field_str(current, "Remotion_Error_Message") == STORY_STORAGE_GUARD:
+    if (field_str(current, "Remotion_Error_Message") == STORY_STORAGE_GUARD
+            or (current.get("id") in _CONCISE_3159_IDS
+                and field_str(current, "Remotion_Error_Message") == STORY_MISSING_SENTENCE)):
         if not storage_guard_clear(client, current, live_parent):
             return current
         # Re-read after the storage probe. R4 still repeats the exact claim
@@ -281,9 +307,9 @@ def rearm_story_sentence_guard(client, output, parent):
         latest = client.get_record(PLATFORM_OUTPUTS_TABLE, current["id"])
         latest_parent = client.get_record(CONTENT_ITEMS_TABLE, parent["id"])
         if (not story_sentence_recovery_candidate(latest, latest_parent)
-                or field_str(latest, "Remotion_Error_Message") != STORY_STORAGE_GUARD
+                or field_str(latest, "Remotion_Error_Message") != storage_recovery_error(latest)
                 or exact_story_snapshot(latest, parent["id"]) != exact_story_snapshot(current, parent["id"])
-                or story_text(field_str(latest_parent, "Voiceover_Script")) != story_text(field_str(live_parent, "Voiceover_Script"))):
+                or story_text_for_output(latest, latest_parent) != story_text_for_output(current, live_parent)):
             return latest
         current = latest
     if cached_only:
@@ -378,7 +404,7 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
     if not enabled():
         raise StoryVoiceoverError("Story narration requires the durable runner governor")
     voice_id=resolve_content_voice_id(parent)
-    text=story_text(field_str(parent,"Voiceover_Script"))
+    text=story_text_for_output(output,parent)
     digest=fingerprint(parent["id"],voice_id,text,cap)
     key=f"studio/previews/story-voiceover/{parent['id']}/{digest}.mp3"
     url="https://media.chicagoshining.com/"+key
@@ -388,7 +414,7 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
         live_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
         if (exact_story_snapshot(current,parent["id"])!=snapshot or story_seconds(current)!=cap
                 or fingerprint(parent["id"],resolve_content_voice_id(live_parent),
-                    story_text(field_str(live_parent,"Voiceover_Script")),cap)!=digest):
+                    story_text_for_output(current,live_parent),cap)!=digest):
             raise StoryVoiceoverError("Story or parent revision changed before narration preparation")
         if current.get("id") in HELD_STORAGE_RECOVERY and (
                 not held_storage_identity(current, live_parent)
@@ -449,7 +475,7 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                             or field(latest,"Do_Not_Publish") is not expected_hold
                             or exact_story_snapshot(latest,parent["id"])!=snapshot
                             or fingerprint(parent["id"],resolve_content_voice_id(latest_parent),
-                                story_text(field_str(latest_parent,"Voiceover_Script")),cap)!=digest
+                                story_text_for_output(latest,latest_parent),cap)!=digest
                             or matching_story_claims(client,latest_parent,latest["id"],digest,url)!=claims):
                         raise StoryVoiceoverError("Story history recovery changed before write")
                     provenance={"history_original_sha256":history["sha256"],
@@ -518,7 +544,7 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
         fresh=client.get_record(PLATFORM_OUTPUTS_TABLE,current["id"])
         live_parent=client.get_record(CONTENT_ITEMS_TABLE,parent["id"])
         if fingerprint(parent["id"],resolve_content_voice_id(live_parent),
-                story_text(field_str(live_parent,"Voiceover_Script")),cap)!=digest:
+                story_text_for_output(current,live_parent),cap)!=digest:
             raise StoryVoiceoverError("Parent script or voice changed before narration binding")
         if exact_story_snapshot(fresh,parent["id"])!=snapshot or story_seconds(fresh)!=cap:
             raise StoryVoiceoverError("Story changed before narration binding")
