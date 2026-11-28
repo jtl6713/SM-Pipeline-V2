@@ -126,6 +126,46 @@ HELD_CACHE_RECOVERY = {
 }
 
 
+# Exact eight storage-guard parents: positive-control HEAD audit 46151753193.
+# A prior absence is NOT a current storage authorization. Normal R4 repeats
+# exact live absence and the durable sibling claim before its first paid call.
+HELD_STORAGE_RECOVERY = {
+    "recONsGlBKsE8VTdP": ("recbjg7rXQCiA6DzY", "1aae9a3cef8cc1fefb95b70155656760dc993e3252d348f746d94d50dedea852"),
+    "recKwClsbFCOJaKbC": ("recbjg7rXQCiA6DzY", "1aae9a3cef8cc1fefb95b70155656760dc993e3252d348f746d94d50dedea852"),
+    "receOfwtyngfyCboh": ("rec0gE5IoTuSoqy5E", "cae8fcf0c3e661c0ba84af5bde37630b8ca97b0d6fdf28e5edad6c8352ee9cc7"),
+    "recgCPmQEWy5cA5Nw": ("rec0gE5IoTuSoqy5E", "cae8fcf0c3e661c0ba84af5bde37630b8ca97b0d6fdf28e5edad6c8352ee9cc7"),
+    "recv8TRI6cYAwF1AF": ("rec1LmWHV6VvfdXp0", "eb8b53dd293d30b2330452d2ee4b4a3ceb71314ab182a9d6668bfb884702acff"),
+    "recqIuVlct8IMs56a": ("rec1LmWHV6VvfdXp0", "eb8b53dd293d30b2330452d2ee4b4a3ceb71314ab182a9d6668bfb884702acff"),
+    "reczMVFz209yngV1Q": ("recKTD3ZnQpNxxvgH", "37166e6ba347f88dd0f88ea6b8c82cd9d4f23e41c3b65ab2f05218c4bc14e4b1"),
+    "recCypRwiZF4xHMgE": ("recKTD3ZnQpNxxvgH", "37166e6ba347f88dd0f88ea6b8c82cd9d4f23e41c3b65ab2f05218c4bc14e4b1"),
+    "reclCt4yPUBDhPR9Y": ("recQnOwB4Qg9FHIup", "44025e7f5c36ee7be229c8bfc18f8a50c5a05956da5418d6c2ba41a3d0552ccb"),
+    "recfrU5PjR5d5VwsR": ("recQnOwB4Qg9FHIup", "44025e7f5c36ee7be229c8bfc18f8a50c5a05956da5418d6c2ba41a3d0552ccb"),
+    "recRHAB4dpThNs7TT": ("recrUkXlSXxtwztFU", "9a31e2e854846221b3f4db01c744b95fbb20e144e2285a34a0f531be02f3ae59"),
+    "recewgpHg6l7SI344": ("recrUkXlSXxtwztFU", "9a31e2e854846221b3f4db01c744b95fbb20e144e2285a34a0f531be02f3ae59"),
+    "recihZZobVTvXDuer": ("recsusqK58K0eP6z3", "1ac49c7889651b2a56fea685f1caf58aad4c6af2bf6ec184ac3586ecb4d8f236"),
+    "rec5wWC93FYeXiqRR": ("recsusqK58K0eP6z3", "1ac49c7889651b2a56fea685f1caf58aad4c6af2bf6ec184ac3586ecb4d8f236"),
+    "recBOQEGqk0lgF4HF": ("recs0vBdT1jmUIWL0", "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"),
+    "reckFi5S3Ynrxxggl": ("recs0vBdT1jmUIWL0", "7b90b68508c2a93a8744a4b2f63a6386a642e4d8eca56e649a799b9ba9d9100d"),
+}
+
+
+def held_storage_identity(output, parent):
+    return (HELD_STORAGE_RECOVERY.get(output.get("id"), (None, None))[0] == parent.get("id")
+            and bool(parent.get("id"))
+            and field(output, "Do_Not_Publish") is True
+            and field(output, "Auto_Publish_Enabled") is False
+            and field_str(output, "Publish_Status") == "Not Ready"
+            and field_str(output, "Review_Status") in {"", "Pending Review", "Review Sent"}
+            and not any(field_str(output, key) for key in (
+                "Scheduled_Post_Date", "Studio_Scheduled_At", "YouTube_Scheduled_Publish_At",
+                "Published_At", "Production_Approved_At", "Platform_Post_ID", "Platform_Post_URL",
+                "Platform_Media_ID", "Platform_Publish_Response", "Publish_Started_At",
+                "Last_Publish_Attempt_At", "Studio_Publish_Dispatch_At", "Publish_Locked_At",
+                "IG_Story_Container_ID", "IG_Story_Post_ID"))
+            and all(field_str(output, key) in {"", "0"} for key in (
+                "Publish_Attempt_Count", "Studio_Publish_Dispatch_Count")))
+
+
 def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
     """Only an unapproved, unheld, unstamped Story with newly valid input.
 
@@ -141,7 +181,9 @@ def story_sentence_recovery_candidate(output, parent, *, cached_only=False):
             or (field(output, "Do_Not_Publish") not in (None, False)
                 and not (cached_only and field(output, "Do_Not_Publish") is True
                          and HELD_CACHE_RECOVERY.get(output.get("id")) == parent.get("id")
-                         and field(output, "Auto_Publish_Enabled") is False))
+                         and field(output, "Auto_Publish_Enabled") is False)
+                and not (not cached_only and field_str(output, "Remotion_Error_Message") == STORY_STORAGE_GUARD
+                         and held_storage_identity(output, parent)))
             or field(output, "Auto_Publish_Enabled") not in (None, False)
             or (not cached_only and field_str(output, RECEIPT))
             or any(field_str(output, name) for name in (
@@ -188,6 +230,10 @@ def storage_guard_clear(client, output, parent):
         cap = story_seconds(output)
         voice = resolve_content_voice_id(parent)
         digest = fingerprint(parent["id"], voice, story_text(field_str(parent, "Voiceover_Script")), cap)
+        if output.get("id") in HELD_STORAGE_RECOVERY and (
+                not held_storage_identity(output, parent)
+                or HELD_STORAGE_RECOVERY[output["id"]] != (parent["id"], digest)):
+            return False
         key = f"studio/previews/story-voiceover/{parent['id']}/{digest}.mp3"
         url = "https://media.chicagoshining.com/" + key
         with resource_slot("story_voiceover", key=parent["id"], limit=1, wait_seconds=0):
@@ -344,6 +390,10 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                 or fingerprint(parent["id"],resolve_content_voice_id(live_parent),
                     story_text(field_str(live_parent,"Voiceover_Script")),cap)!=digest):
             raise StoryVoiceoverError("Story or parent revision changed before narration preparation")
+        if current.get("id") in HELD_STORAGE_RECOVERY and (
+                not held_storage_identity(current, live_parent)
+                or HELD_STORAGE_RECOVERY[current["id"]] != (live_parent["id"], digest)):
+            raise StoryVoiceoverError("Audited held storage recovery identity changed")
         claims=matching_story_claims(client,live_parent,current["id"],digest,url)
         known = {claim["sha256"] for claim in claims if claim.get("sha256")}
         from studio_produce.story_history_recovery import HISTORY_RECOVERY, download_audited_history, fit_short_audited_history
