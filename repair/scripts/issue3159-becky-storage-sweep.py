@@ -188,9 +188,54 @@ LOCAL = "http://127.0.0.1:3350"
 REMOTION = "http://127.0.0.1:3333"
 GATE = dt.datetime(2026,11,28,7,tzinfo=dt.timezone.utc)
 PHASE = "init"
+# Local read-only audit limit for exact allowlisted, newly completed Stories.
+# No global producer, transfer or publication limit is changed.
+LIMIT = 64*1024*1024
+# Canonical preflight identified real creative conflicts. Do not incur a new
+# synthesis until an exact output-specific correction has been proven.
+CREATIVE_EXCEPTIONS = {
+    "rec2yYRS9aVFeK1r3": "dim_sum_source_logan_boulevard_requires_reconciliation",
+    "reci9P7UQXRVFtuTM": "los_angeles_source_chicago_narration_requires_reconciliation",
+}
+def candidate_priority(candidate):
+    return (11226 not in candidate["stories"].values(),)
 
 def require(value, reason):
     if not value: raise RuntimeError(reason)
+
+def stream_exact_media(response, path, expected_size):
+    """Reject an oversized/mismatched response before it can fill disk."""
+    require(0<expected_size<=LIMIT,"media_size_budget")
+    require(response.status_code==200,"media_unavailable")
+    declared=response.headers.get("Content-Length")
+    require(declared is None or (declared.isdecimal() and int(declared)==expected_size),"media_content_length")
+    n=0
+    with path.open("wb") as out:
+        for chunk in response.iter_content(1024*1024):
+            n+=len(chunk)
+            require(n<=expected_size,"media_byte_budget")
+            out.write(chunk)
+    require(n==expected_size,"media_length_mismatch")
+
+def file_sha256(path):
+    with path.open("rb") as source:
+        return hashlib.file_digest(source,"sha256").hexdigest()
+
+def inspect(path):
+    info=json.loads(subprocess.check_output(
+        ["ffprobe","-v","error","-count_frames","-show_streams","-show_format","-of","json",str(path)],
+        timeout=45,stderr=subprocess.DEVNULL))
+    video=[s for s in info["streams"] if s["codec_type"]=="video"]
+    audio=[s for s in info["streams"] if s["codec_type"]=="audio"]
+    require(len(video)==len(audio)==1,"stream_contract")
+    v=video[0]; dur=float(info["format"]["duration"])
+    require(v["width"]==1080 and v["height"]==1920 and int(v["nb_read_frames"])==300 and 9.95<=dur<=10.15,"video_contract")
+    p=subprocess.run(["ffmpeg","-hide_banner","-nostats","-xerror","-i",str(path),"-map","0:v:0","-map","0:a:0","-af","volumedetect","-f","null","NUL"],capture_output=True,text=True,timeout=60)
+    peak=re.search(r"max_volume:\s*(-?[0-9.]+) dB",p.stderr)
+    require(p.returncode==0 and peak and float(peak.group(1))>-50,"video_decode_or_audio")
+    return {"bytes":path.stat().st_size,"sha256":file_sha256(path),"frames":300,
+            "width":1080,"height":1920,"duration":dur,"peak_db":float(peak.group(1)),"decode":"PASS"}
+
 
 def decode_receipt(value):
     for _ in range(3):
@@ -387,26 +432,43 @@ def recover(candidate):
             after={i:current[i] for i in PAIR}; break
     require(after is not None,"observe_timeout_no_retry")
     PHASE="media"
+    # Same exact identity/size/stream/decode checks as the protected completed
+    # Story audit; an oversized or ambiguous artifact remains an exception,
+    # never grounds for replay of the original accepted request.
+    if not os.getenv("PORT"): os.environ["PORT"]="3350"
+    sys.path.insert(0,str(BASE))
+    from integrations.google_drive import GoogleDriveClient
+    from studio_produce import workload_governor as g
+    require(g.enabled() and not g.recovery_read_only_active() and not g.circuit_open(),"media_governor_unavailable")
+    drive=GoogleDriveClient()
     proofs={}
     for ident,row in after.items():
         require(row["output_status"]=="Ready for Review" and row["render_status"]=="Rendered" and row.get("final_file_url") and row.get("remotion_job_id") and receipt(row).get("state")=="verified","factory_state_unverified")
         preview=row.get("studio_preview_url") or ""
-        require(re.fullmatch(r"job-[a-zA-Z0-9-]+",str(row.get("remotion_job_id"))) is not None and preview==f"https://media.chicagoshining.com/studio/previews/{ident}/jobs/{row['remotion_job_id']}.mp4","preview_identity")
+        require(re.fullmatch(r"job-[0-9]{14}-[a-f0-9]{8}",str(row.get("remotion_job_id"))) is not None and preview==f"https://media.chicagoshining.com/studio/previews/{ident}/jobs/{row['remotion_job_id']}.mp4","preview_identity")
+        match=re.fullmatch(r"https://drive\.google\.com/file/d/([A-Za-z0-9_-]{10,100})/view",str(row.get("final_file_url") or ""))
+        require(match,"drive_identity")
+        drive_id=match.group(1)
+        require(2<=float(receipt(row).get("seconds",0))<=9.9,"narration_duration")
         with tempfile.TemporaryDirectory(prefix="3159-story-video-") as d:
-            path=Path(d)/"story.mp4"; n=0
-            with requests.get(preview,timeout=30,stream=True,allow_redirects=False) as r:
-                require(r.status_code==200,"preview_unavailable")
-                with path.open("wb") as f:
-                    for chunk in r.iter_content(65536):
-                        n+=len(chunk);require(n<=32*1024*1024,"video_byte_budget");f.write(chunk)
-            info=json.loads(subprocess.check_output(["ffprobe","-v","error","-count_frames","-show_streams","-show_format","-of","json",str(path)],timeout=45))
-            video=[s for s in info["streams"] if s["codec_type"]=="video"];audio=[s for s in info["streams"] if s["codec_type"]=="audio"]
-            require(len(video)==len(audio)==1 and video[0]["width"]==1080 and video[0]["height"]==1920 and int(video[0]["nb_read_frames"])==300,"video_contract")
-            v=subprocess.run(["ffmpeg","-hide_banner","-nostats","-xerror","-i",str(path),"-map","0:v:0","-map","0:a:0","-af","volumedetect","-f","null","NUL"],capture_output=True,text=True,timeout=60)
-            peak=re.search(r"max_volume:\s*(-?[0-9.]+) dB",v.stderr)
-            require(v.returncode==0 and peak and float(peak.group(1))>-50,"video_decode_or_audio")
-            media={"bytes":n,"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"frames":300,"duration":float(info["format"]["duration"]),"peak_db":float(peak.group(1))}
-        proofs[str(PAIR[ident])]={**media,"render_job":row["remotion_job_id"]}
+            a=Path(d)/"drive.mp4"; b=Path(d)/"preview.mp4"
+            with g.resource_slot("transfer",key=f"3159-sweep-{PAIR[ident]}",limit=1,wait_seconds=5):
+                meta=drive.get_file(drive_id,fields="id,size,mimeType,trashed")
+                size_text=str(meta.get("size") or "")
+                size=int(size_text) if size_text.isdecimal() else 0
+                require(meta.get("id")==drive_id and meta.get("trashed") is False and meta.get("mimeType")=="video/mp4","drive_identity_or_type")
+                require(0<size<=LIMIT,"drive_size_budget")
+                with requests.get("https://www.googleapis.com/drive/v3/files/"+drive_id,
+                    params={"alt":"media","supportsAllDrives":"true"},
+                    headers={"Authorization":"Bearer "+drive.access_token()},
+                    stream=True,timeout=(5,45),allow_redirects=False) as response:
+                    stream_exact_media(response,a,size)
+                with requests.get(preview,stream=True,timeout=(5,45),allow_redirects=False) as response:
+                    stream_exact_media(response,b,size)
+                require(drive.get_file(drive_id,fields="id,size,mimeType,trashed")==meta,"drive_metadata_changed")
+            first=inspect(a); second=inspect(b)
+            require(first["sha256"]==second["sha256"],"drive_preview_byte_mismatch")
+        proofs[str(PAIR[ident])]={**second,"drive_sha256":first["sha256"],"drive_decode":first["decode"],"render_job":row["remotion_job_id"]}
     require(len({receipt(row)["sha256"] for row in after.values()})==1,"shared_narration_checksum")
     PHASE="final_readback"
     require(rows()=={**before,**after} and job()["step"]=="done" and queue_state()[0]==[],"final_readback_changed")
@@ -426,9 +488,12 @@ def main():
     require(path.is_absolute() and path.is_file(),"governor_db_missing")
     with sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,timeout=3) as db:
         paused={r[0] for r in db.execute("SELECT request_id FROM producer_jobs WHERE state='paused'")}
-    for candidate in COHORT:
+    for candidate in sorted(COHORT,key=candidate_priority):
         rid=candidate["request"]
         if rid not in paused or (BASE/f"outage3159-storage-{rid}-once.json").exists():
+            continue
+        if rid in CREATIVE_EXCEPTIONS:
+            print("SWEEP3159_CANDIDATE_SKIP="+json.dumps({"request":rid,"reason":CREATIVE_EXCEPTIONS[rid]}),flush=True)
             continue
         PHASE="candidate"
         try:
