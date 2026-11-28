@@ -11,12 +11,11 @@ from apc.constants import (
     ERROR_AP4C,
     MAKE_AP4C_ID,
     MAKE_AP4C_NAME,
-    PARENT_NOT_CREATED,
     PUBLISH_STATUS_FAILED,
     REPLACE_MANUAL,
     RETRY_MINUTES,
     STAGE_AP4C,
-    STATUS_ASSETS_READY,
+    STATUS_RETRY,
     STATUS_MANUAL_FALLBACK,
     STATUS_PARENT_READY,
     STATUS_PUBLISHING,
@@ -45,28 +44,24 @@ def _expired_media_error(payload: Any) -> bool:
     return "expired" in text and "media" in text
 
 
-def _expired_media_reset(output: dict[str, Any], message: str, payload: Any) -> dict[str, Any]:
+def _expired_media_reconciliation(output: dict[str, Any], message: str, payload: Any) -> dict[str, Any]:
+    # A publish-stage error is not permission to erase a provider identity or
+    # create a new revision. Retain the parent/child evidence and require the
+    # existing exact owner reconciliation and future reservation process.
     return {
         **unlock_fields(),
-        "IG_Carousel_Status": STATUS_ASSETS_READY,
-        "Publish_Next_Retry_At": retry_at(RETRY_MINUTES),
-        "Publish_Retry_Eligible": True,
+        "IG_Carousel_Status": STATUS_RETRY,
+        "Publish_Next_Retry_At": None,
+        "Publish_Retry_Eligible": False,
         "IG_Carousel_Error_Stage": ERROR_AP4C,
         "IG_Carousel_Retry_Count": (parse_int(field(output, "IG_Carousel_Retry_Count"), 0) or 0) + 1,
         "IG_Carousel_Error_Message": (
-            f"{message}. Instagram reported expired media; AP1C will recreate fresh child containers "
-            "and AP3C will create a fresh parent before publishing."
+            f"{message}. QA-IG-AP4C-RECONCILIATION-REQUIRED: Instagram reported expired media; "
+            "existing provider identities retained; no automatic recreation."
         ),
-        "IG_Carousel_Next_Retry_At": retry_at(RETRY_MINUTES),
-        "IG_Carousel_Children_Ready_Count": 0,
-        "IG_Carousel_Parent_Status": PARENT_NOT_CREATED,
-        "IG_Carousel_Parent_Container_ID": "",
-        "IG_Carousel_Parent_Created_At": None,
-        "IG_Carousel_Parent_Last_Checked_At": None,
-        "IG_Carousel_Parent_Poll_Attempt_Count": 0,
-        "IG_Carousel_Parent_Response_JSON": response_json(payload),
+        "IG_Carousel_Next_Retry_At": None,
+        "IG_Carousel_Publish_Response_JSON": response_json(payload),
     }
-
 
 def _replace_fail(output: dict[str, Any], message: str, payload: Any) -> dict[str, Any]:
     return {
@@ -211,10 +206,10 @@ def process_request(
         client.update_record(
             PLATFORM_OUTPUTS_TABLE,
             record_id,
-            _expired_media_reset(output, message, payload),
+            _expired_media_reconciliation(output, message, payload),
             typecast=True,
         )
-        result.update({"processed": True, "needs_children": True, "expired_media": True})
+        result.update({"processed": True, "reconciliation_required": True, "expired_media": True})
         return result
 
     if replace:
