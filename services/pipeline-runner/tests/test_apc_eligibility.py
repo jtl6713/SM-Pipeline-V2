@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from apc.ap2c import _pending_max_attempts
-from apc.ap4c import _expired_media_error, _expired_media_reset
+from apc.ap4c import _expired_media_error, _expired_media_park
 from apc.assets import list_child_slides, list_final_slides, public_asset_url, r2_object_key, saved_public_url, source_image_url
 from apc.common import expected_child_count, is_due, publish_caption, reconcile_caption
 from carousel.timeutil import iso_utc, utc_now
@@ -127,14 +127,30 @@ def test_ap4c_expired_media_restarts_container_chain():
     assert _expired_media_error(payload) is True
     assert _expired_media_error({"error": {"message": "Temporary error"}}) is False
 
-    reset = _expired_media_reset(_record(IG_Carousel_Retry_Count=4), "AP4C media_publish failed", payload)
-    assert reset["IG_Carousel_Status"] == "Assets Ready"
-    assert reset["IG_Carousel_Parent_Status"] == "Not Created"
-    assert reset["IG_Carousel_Parent_Container_ID"] == ""
-    assert reset["IG_Carousel_Children_Ready_Count"] == 0
-    assert reset["Publish_Retry_Eligible"] is True
+    reset = _expired_media_park(_record(IG_Carousel_Retry_Count=4), "AP4C media_publish failed", payload)
+    assert reset["IG_Carousel_Status"] == "Retry Pending"
+    assert reset["Publish_Retry_Eligible"] is False
+    assert reset["Publish_Next_Retry_At"] is None
+    assert reset["IG_Carousel_Next_Retry_At"] is None
     assert reset["IG_Carousel_Retry_Count"] == 5
-    assert "recreate fresh child containers" in reset["IG_Carousel_Error_Message"]
+    assert "RECONCILIATION-REQUIRED" in reset["IG_Carousel_Error_Message"]
+    assert "2207020" in reset["IG_Carousel_Publish_Response_JSON"]
+    preserved = {"IG_Carousel_Parent_Container_ID", "IG_Carousel_Parent_Created_At",
+                 "IG_Carousel_Parent_Poll_Attempt_Count", "IG_Carousel_Children_Ready_Count",
+                 "IG_Carousel_Parent_Status", "IG_Carousel_Parent_Last_Checked_At",
+                 "IG_Carousel_Publish_Attempt_Count", "IG_Carousel_Parent_Response_JSON",
+                 "Scheduled_Post_Date", "Auto_Publish_Enabled", "Do_Not_Publish",
+                 "Review_Status", "Output_Status"}
+    assert not preserved.intersection(reset)
+    parked = _record(Platform="Instagram", Platform_Output_Type="Instagram Carousel",
+                     Output_Status="Approved for Publishing", Review_Status="Approved",
+                     Publish_Status="Ready to Publish", Publish_Method="Automated",
+                     Auto_Publish_Enabled=True, IG_Carousel_Parent_Container_ID="123456789",
+                     **reset)
+    for gate in (ap0c_eligibility_reason, ap1c_eligibility_reason, ap2c_eligibility_reason,
+                 ap3c_eligibility_reason, ap3p_eligibility_reason, ap4c_eligibility_reason,
+                 ap4r_eligibility_reason, ap5c_eligibility_reason):
+        assert gate(parked) is not None
 
 
 def test_ap1c_preserves_existing_children_and_backs_off_rate_limit():
