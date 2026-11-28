@@ -1,0 +1,73 @@
+name: Issue 3159 recovered Story Factory proof
+on:
+  pull_request:
+    paths: ['.github/workflows/issue3159-factory-proof.yml']
+  workflow_run:
+    workflows: ['Deploy Studio API Worker Production']
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: issue3159-factory-proof
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate read-only shell and JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          source=Path('.github/workflows/issue3159-factory-proof.yml').read_text()
+          block=source.split('      - name: Read exact recovered Factory cards\n',1)[1].split('        run: |\n',1)[1]
+          shell='\n'.join(line[10:] for line in block.splitlines())+'\n'
+          subprocess.run(['bash','-n'],input=shell,text=True,check=True)
+          js=shell.split("node - <<'NODE'\n",1)[1].split('\nNODE',1)[0]
+          subprocess.run(['node','--check','-'],input=js,text=True,check=True)
+          assert ' -X ' not in shell and '/api/factory/desk?' in shell
+          PY
+  readback:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository && contains(github.event.workflow_run.head_commit.message, '3159 protected Worker release and Factory proof')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Read exact recovered Factory cards
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CF_ACCESS_CLIENT_ID" && test -n "$CF_ACCESS_CLIENT_SECRET"
+          [[ "$DEPLOY_SHA" =~ ^[a-f0-9]{40}$ ]]
+          code=$(curl -sS --max-time 100 -o /tmp/3159-factory.json -w '%{http_code}' -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H 'Accept: application/json' "https://studio.chicagoshining.com/api/factory/desk?issue3159_readonly=$DEPLOY_SHA")
+          echo "factory3159_http=$code"
+          test "$code" = 200
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const data=JSON.parse(fs.readFileSync('/tmp/3159-factory.json','utf8'));
+          if (!Array.isArray(data?.lanes?.needs_eyes)) throw Error('Factory lane unavailable');
+          const all=Object.entries(data.lanes).flatMap(([lane,cards])=>Array.isArray(cards)?cards.map(c=>({lane,c})):[]);
+          const recovered=[11202,11203,11234,11235,11240,11241,11250,11251,11262,11263,11310,11311];
+          const siblings=[11237,11238,11239];
+          const lanes=new Set(['needs_eyes','needs_assets','manual','auto_high']);
+          const states=new Set(['Ready for Review','In Production','Blocked','Rendered','Approved','Approved for Publishing','Review Sent','Pending Review','Not Ready','Ready to Schedule','Ready to Publish']);
+          const safe=v=>states.has(v)?v:null;
+          const rows=[...recovered,...siblings].map(id=>{
+            const m=all.filter(({c})=>Number(c.output_id)===id);
+            const c=m[0]?.c;
+            return {id,matches:m.length,lane:lanes.has(m[0]?.lane)?m[0].lane:null,held:c?.do_not_publish===true,ready:c?.review_package_ready===true,preview:c?.can_preview===true,approve:c?.can_approve===true,approval_blocked:c?.can_approve===false,auto_publish:c?.auto_publish_enabled===true,status:safe(c?.output_status),review:safe(c?.review_status),publish:safe(c?.publish_status),render:safe(c?.render_status)};
+          });
+          console.log('factory3159_rows='+JSON.stringify(rows));
+          const visible=rows.filter(r=>recovered.includes(r.id)&&r.matches===1&&r.lane==='needs_eyes'&&r.ready&&r.preview&&r.render==='Rendered'&&r.status==='Ready for Review');
+          const formallyEligible=visible.filter(r=>!r.held&&!r.approval_blocked&&!r.auto_publish&&r.publish==='Not Ready');
+          console.log('factory3159_summary='+JSON.stringify({targeted:recovered.length,visible:visible.length,formal_eligible:formallyEligible.length,held_visible:visible.filter(r=>r.held).length,missing_or_unready:recovered.filter(id=>!visible.some(r=>r.id===id))}));
+          if(visible.length!==recovered.length)throw Error('Recovered Factory visibility incomplete; inspect exact rows');
+          if(formallyEligible.length!==recovered.length)throw Error('Formal approval eligibility incomplete; no hold changes made');
+          console.log('factory3159=PASS');
+          NODE

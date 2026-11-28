@@ -1708,3 +1708,5 @@ Deploy Studio API Worker 0.10.1026 bounded read-only Factory active discovery #1
 2026-11-28 UTC — #3159 strengthen single-gallery finalization proof: exact saved provider ID, unchanged profile/content, permalink and publication time must match canonical readback. No capacity or schedule changes; retain all canary and outage fences.
 
 2026-11-28 UTC — #3159 exact NYC missing schedule mirror repair through the existing atomic MAE lane; one successful move per tick, explicit output/profile identities, full row CAS and pending/committed receipt; refuse prior provider or dispatch evidence. No provider calls, hold changes or gallery capacity expansion.
+
+2026-11-28 UTC — #3159 protected release of merged #3240 (280b918f9ea49f4a0feaa72416db1fe5ca1b37db; 12/12 exact-head checks). Becky read-only lifecycle conflict and approved sibling drift classification only. Keep minute-only cron, existing publication fence, Supabase authority, cap2 and all approval/provider/hold safeguards; no new admission, recovery writes or publication. Verify protected release, then exact authenticated Factory visibility.
