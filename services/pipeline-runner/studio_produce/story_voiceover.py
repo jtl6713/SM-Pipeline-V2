@@ -66,7 +66,7 @@ def exact_story_snapshot(output, parent_id):
     return tuple(field_str(output, name) for name in (
         "Output_Filename", "Voiceover_URL", "Studio_Effective_Voiceover_Mode",
         "Studio_Effective_Background_Music_Mode", "Render_Total_Frames",
-        "Selected_Assets_JSON", "Render_Clip_List_JSON", "Output_Caption",
+        "Selected_Assets_JSON", "Render_Clip_List_JSON", "Output_Caption", "Output_Hashtags",
     ))
 
 
@@ -197,6 +197,7 @@ def market_story_revision(output, parent):
     clips = manifest.get("selected_clips") if isinstance(manifest, dict) else None
     keys = ("asset_name", "media_asset_record_id", "source_asset_id", "google_drive_file_id")
     caption = field_str(output, "Output_Caption")
+    hashtags = field_str(output, "Output_Hashtags")
     own = parse_json_field(field(output, RECEIPT)) or {}
     if (parent.get("id") != pid or not held_storage_identity(output, parent)
             or field_str(output, "Publish_Hold_Reason") != "Music duration not verified; repair before rendering."
@@ -204,6 +205,7 @@ def market_story_revision(output, parent):
             or not isinstance(clips, list) or len(clips) != 1 or not isinstance(clips[0], dict)
             or [clips[0].get(k) for k in keys] != spec["clip"]
             or caption not in (spec["old_caption"], spec["caption"])
+            or hashtags != caption.rsplit("\n\n",1)[-1]
             or (own and (not isinstance(own, dict) or own.get("fingerprint") != spec["fingerprint"]))
             or (caption == spec["caption"] and (own.get("state") != "verified"
                  or own.get("text") != spec["text"]))):
@@ -632,10 +634,12 @@ def ensure_story_voiceover(client,output,parent, *, allow_generate=True):
                     "seconds":measured,"sha256":hashlib.sha256(data).hexdigest(),**provenance},separators=(",",":"))}
         if revision:
             patch["Output_Caption"] = revision["caption"]
+            patch["Output_Hashtags"] = revision["caption"].rsplit("\n\n",1)[-1]
         client.update_record(PLATFORM_OUTPUTS_TABLE,fresh["id"],patch,typecast=True)
         if revision:
             confirmed = client.get_record(PLATFORM_OUTPUTS_TABLE,fresh["id"])
             if (field_str(confirmed,"Output_Caption") != revision["caption"]
+                    or field_str(confirmed,"Output_Hashtags") != patch["Output_Hashtags"]
                     or parse_json_field(field(confirmed,RECEIPT)) != json.loads(patch[RECEIPT])
                     or not held_storage_identity(confirmed,live_parent)):
                 raise StoryVoiceoverError("Market Story caption and narration receipt not durably bound")
