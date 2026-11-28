@@ -21,6 +21,9 @@ jobs:
   readback:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: preflight
+    permissions:
+      contents: read
+      statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
@@ -57,3 +60,14 @@ jobs:
               raise SystemExit('Incident runtime proof incomplete: do not restore publishing')
           print('outage_runtime_readback=PASS')
           PY
+      - name: Publish readback result and evidence link
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-live-outage-readback",target_url:$url,description:"Read-only outage health and cron evidence"}' >/tmp/receipt.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/receipt.json >/dev/null
