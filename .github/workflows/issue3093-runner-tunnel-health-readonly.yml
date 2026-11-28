@@ -1,0 +1,57 @@
+name: Issue 3093 Runner and Ops tunnel health (read only)
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/issue3093-runner-tunnel-health-readonly.yml']
+  pull_request:
+    paths: ['.github/workflows/issue3093-runner-tunnel-health-readonly.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Read public health and tunnel state, without configuration writes
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, re, urllib.request, urllib.error
+          def get(url, headers=None):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=15) as res:
+                      return res.status, res.read(100000)
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read(100000)
+              except Exception:
+                  return 0, b''
+          for name,path in [('pipeline','/health'),('ops','/api/catalog'),('studio','/')]:
+              code,body=get('https://'+name+'.chicagoshining.com'+path)
+              print(name+'_http='+str(code))
+              # Print only known Cloudflare error codes, never the response body.
+              for err in ('1033','1016','1020','1000','1014','1101'):
+                  if re.search(rb'(?i)(?:error(?:\s+code)?[\s:]+)'+err.encode()+rb'\b',body):
+                      print(name+'_edge_error='+err)
+              if name=='pipeline' and code==200:
+                  try:
+                      p=json.loads(body)
+                      print('runner_service_verified='+str(p.get('service')=='pipeline-runner'))
+                      print('runner_supabase_authority='+str(p.get('studio_write_source')=='supabase'))
+                  except ValueError:
+                      print('runner_json_invalid')
+          if os.environ.get('CF_TOKEN') and os.environ.get('CF_ACCOUNT'):
+              h={'Authorization':'Bearer '+os.environ['CF_TOKEN'],'Accept':'application/json'}
+              base='https://api.cloudflare.com/client/v4/accounts/'+os.environ['CF_ACCOUNT']+'/cfd_tunnel'
+              code,body=get(base+'/f7a22f0f-f760-4e16-a085-3538d22981f1',h)
+              print('tunnel_status_http='+str(code))
+              if code==200:
+                  result=json.loads(body).get('result') or {}
+                  status=result.get('status')
+                  if status in ('healthy','degraded','down','inactive'):
+                      print('tunnel_status='+status)
+                  print('tunnel_connections='+str(len(result.get('connections') or [])))
+          print('diagnostic_readonly=true')
+          PY
