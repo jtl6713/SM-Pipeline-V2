@@ -5,7 +5,14 @@ on:
     paths:
       - '.github/workflows/issue3159-ten-minute-recovery.yml'
       - 'repair/scripts/issue3159-story11252-scheduled-probe.py'
+      - 'repair/scripts/issue3159-becky-storage-sweep.py'
       - '.github/scripts/incident-3159-paused-render-inventory.ps1'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-ten-minute-recovery.yml'
+      - 'repair/scripts/issue3159-becky-storage-sweep.py'
+  workflow_dispatch:
   schedule:
     - cron: '3,13,23,33,43,53 * * * *'
 permissions:
@@ -65,13 +72,37 @@ jobs:
           assert check(dict(idle,max_jobs=3))[1]
           assert check(dict(idle,active_jobs=2,active_worker_heavy=1,combined_heavy_active=3))[1]
           PY
+      - name: Validate Becky exact storage cohort and one-shot fences
+        shell: bash
+        run: |
+          python -m py_compile repair/scripts/issue3159-becky-storage-sweep.py
+          python - <<'PY'
+          import ast,re
+          from pathlib import Path
+          path=Path('repair/scripts/issue3159-becky-storage-sweep.py')
+          s=path.read_text(); tree=ast.parse(s)
+          cohort=ast.literal_eval(next(n.value for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='COHORT' for t in n.targets)))
+          assert len(cohort)==8 and len({r['request'] for r in cohort})==8
+          assert sorted(n for r in cohort for n in r['stories'].values())==[11240,11241,11262,11263,11268,11269,11310,11311,11316,11317,11322,11323,11328,11329,11340,11341]
+          deployed=ast.parse(Path('services/pipeline-runner/studio_produce/story_voiceover.py').read_text())
+          held=ast.literal_eval(next(n.value for n in deployed.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='HELD_STORAGE_RECOVERY' for t in n.targets)))
+          assert held=={i:(r['parent'],r['fingerprint']) for r in cohort for i in r['stories']}
+          for r in cohort:
+              assert len(r['stories'])==2 and len(r['siblings'])==4
+              assert re.fullmatch(r'[a-f0-9]{64}',r['fingerprint'])
+          assert s.count('requests.post(')==1 and 'marker.open("x"' in s and 'if recover(candidate)' in s
+          for forbidden in ('requests.patch','requests.put','requests.delete','/publish-now','force-release','UPDATE producer_jobs','DELETE FROM'):
+              assert forbidden not in s
+          assert 'source_or_hold_changed' in s and 'ambiguous_narration_attempt_no_retry' in s
+          PY
   readback:
-    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 8
     outputs:
       candidate: ${{ steps.inventory.outputs.candidate }}
+      storage_candidate: ${{ steps.inventory.outputs.storage_candidate }}
     steps:
       - uses: actions/checkout@v6
       - name: Avoid competing main-branch protected operations
@@ -85,7 +116,7 @@ jobs:
           for status in in_progress queued pending waiting requested; do
             runs=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api?branch=main&status=$status&per_page=100")
             jq -e '.total_count <= 100' <<<"$runs" >/dev/null
-            if jq -e --argjson own "$GITHUB_RUN_ID" 'any(.workflow_runs[]; .id != $own and .event != "pull_request" and .name != "Issue 3159 ten-minute governed recovery sweep")' <<<"$runs" >/dev/null; then
+            if jq -e --argjson own "$GITHUB_RUN_ID" 'any(.workflow_runs[]; .id != $own and .event != "pull_request" and .name != "Issue 3159 ten-minute governed recovery sweep" and .name != "Log Commit" and .name != "Push on main" and .name != "Log CI parts")' <<<"$runs" >/dev/null; then
               echo 'sweep3159_skip=competing_main_workflow'
               exit 0
             fi
@@ -143,11 +174,158 @@ jobs:
           h=health[0]
           candidate=(h['circuit']=='closed' and h['cap']==2 and h['active']==h['queued']==h['remotion_active']==0 and any(r.get('request_record')=='recp4apT5iDDfphbh' and r.get('job')=='spj-0e8e0ebc1337' and r.get('classification')=='read_only_inventory' for r in rows))
           with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('candidate='+str(candidate).lower()+'\n')
+          import ast
+          tree=ast.parse(Path('repair/scripts/issue3159-becky-storage-sweep.py').read_text())
+          cohort=ast.literal_eval(next(n.value for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='COHORT' for t in n.targets)))
+          storage_candidate=(h['circuit']=='closed' and h['cap']==2 and h['active']==h['queued']==h['remotion_active']==0 and any(r.get('request_record')==c['request'] and r.get('job')==c['job'] and r.get('classification')=='read_only_inventory' for r in rows for c in cohort))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('storage_candidate='+str(storage_candidate).lower()+'\n')
           if not rows: print('sweep3159=backlog_zero_no_submissions')
           PY
-  recover-audited-pair:
-    if: github.event_name == 'schedule' && github.ref == 'refs/heads/main' && needs.readback.outputs.candidate == 'true'
+  recover-storage:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.readback.outputs.storage_candidate == 'true'
     needs: [validate, readback]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      no_submission: ${{ steps.recover.outputs.no_submission }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Avoid competing main-branch protected operations
+        id: quiet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs"
+          for status in in_progress queued pending waiting requested; do
+            runs=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api?branch=main&status=$status&per_page=100")
+            jq -e '.total_count <= 100' <<<"$runs" >/dev/null
+            if jq -e --argjson own "$GITHUB_RUN_ID" 'any(.workflow_runs[]; .id != $own and .event != "pull_request" and .name != "Issue 3159 ten-minute governed recovery sweep" and .name != "Log Commit" and .name != "Push on main" and .name != "Log CI parts")' <<<"$runs" >/dev/null; then
+              echo 'sweep3159_skip=competing_main_workflow'
+              exit 0
+            fi
+          done
+          echo 'ok=true' >> "$GITHUB_OUTPUT"
+      - name: Verify exact deployed Runner and second pair proof
+        if: steps.quiet.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          statuses=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/124fb31441ff637ce0b60483fd7c3643815ee9c2/status")
+          runs=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs?branch=main&event=push&status=success&per_page=100")
+          deployed=$(jq -er '[.workflow_runs[] | select(.name=="Deploy Pipeline Runner via Ops Dashboard" and .head_branch=="main" and .conclusion=="success")][0].head_sha' <<<"$runs")
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --quiet --depth=1 origin "$deployed"
+          git diff --exit-code "$deployed" "$GITHUB_SHA" -- services/pipeline-runner
+          deployed_status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/$deployed/status")
+          test "$(jq -r '[.statuses[] | select(.context=="production/pipeline-runner")][0].state // "pending"' <<<"$deployed_status")" = success
+          test "$(jq -r '[.statuses[] | select(.context=="production/issue3159-story11234-pair-probe")][0].state // "pending"' <<<"$statuses")" = success
+      - name: Verify scheduler still minute-only before exact recovery
+        if: steps.quiet.outputs.ok == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_pre_crons=minute_only')
+          PY
+      - name: Becky one exact storage parent recovery through protected Ops
+        id: recover
+        if: steps.quiet.outputs.ok == 'true'
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          python - <<'PY'
+          import hashlib,json,os,re
+          from pathlib import Path
+          source=Path('repair/scripts/issue3159-becky-storage-sweep.py')
+          sha=os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          expected=hashlib.sha256(source.read_bytes()).hexdigest()
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          command=("$ErrorActionPreference='Stop';"
+            "$tmp=Join-Path $env:TEMP ('issue3159-becky-storage-'+[guid]::NewGuid().ToString('N')+'.py');"
+            f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+            f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
+            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+          Path('/tmp/request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          job=''
+          for attempt in $(seq 1 1); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "audit_ops_http=$code"; exit 1; }
+            sleep 5
+          done
+          [[ -n "$job" ]] || { echo "sweep3159_skip=ops_busy"; exit 0; }
+          echo "audit_job_id=$job"
+          for attempt in $(seq 1 240); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status' /tmp/status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          python - <<'PY'
+          import ast,json,re,os
+          from pathlib import Path
+          tree=ast.parse(Path('repair/scripts/issue3159-becky-storage-sweep.py').read_text())
+          cohort=ast.literal_eval(next(n.value for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='COHORT' for t in n.targets)))
+          accepted={'STORY3159_ACCEPTED_ONCE='+c['request']:c for c in cohort}
+          job=json.loads(Path('/tmp/status.json').read_text())['job']
+          out=job.get('log','')
+          lines=out.splitlines()
+          skips=[line for line in lines if re.fullmatch(r'SWEEP3159_SKIP=[a-z_]+',line)]
+          if job['status']=='ok' and len(skips)==1 and not any(line.startswith('STORY3159_ACCEPTED_ONCE=') for line in lines):
+              print(skips[0])
+              with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('no_submission=true\n')
+              raise SystemExit(0)
+          for line in lines:
+              if re.fullmatch(r'STORY3159_ERROR=[A-Za-z_]+',line) or line in accepted or re.fullmatch(r'SWEEP3159_CANDIDATE_SKIP=\{.*\}',line):
+                  print(line)
+              elif re.fullmatch(r'STORY3159_(AUDIO|GOVERNOR|PROOF)=\{.*\}',line):
+                  print(line)
+          if job['status']!='ok': raise SystemExit('exact_story_probe_incomplete_no_automatic_retry')
+          proofs=[line for line in lines if line.startswith('STORY3159_PROOF=')]
+          assert len(proofs)==1
+          proof=json.loads(proofs[0].split('=',1)[1])
+          matches=[accepted[line] for line in lines if line in accepted]
+          assert len(matches)==1
+          expected=sorted(matches[0]['stories'].values())
+          assert proof['output']==expected[0] and proof['circuit']=='closed'
+          assert proof['outputs']==expected and proof['sibling_records_unchanged']==4 and proof['publication_fence_preserved'] and proof['approval_required'] and proof['submissions']==1
+          assert set(proof['media'])=={str(n) for n in expected} and all(v['frames']==300 and v['render_job'].startswith('job-') for v in proof['media'].values())
+          PY
+      - name: Verify final scheduler remains minute-only
+        if: always() && steps.quiet.outputs.ok == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_post_crons=minute_only')
+          PY
+  recover-audited-pair:
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.readback.result == 'success' && needs.readback.outputs.candidate == 'true' && (needs.recover-storage.result == 'skipped' || (needs.recover-storage.result == 'success' && needs.recover-storage.outputs.no_submission == 'true'))
+    needs: [validate, readback, recover-storage]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -163,7 +341,7 @@ jobs:
           for status in in_progress queued pending waiting requested; do
             runs=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api?branch=main&status=$status&per_page=100")
             jq -e '.total_count <= 100' <<<"$runs" >/dev/null
-            if jq -e --argjson own "$GITHUB_RUN_ID" 'any(.workflow_runs[]; .id != $own and .event != "pull_request" and .name != "Issue 3159 ten-minute governed recovery sweep")' <<<"$runs" >/dev/null; then
+            if jq -e --argjson own "$GITHUB_RUN_ID" 'any(.workflow_runs[]; .id != $own and .event != "pull_request" and .name != "Issue 3159 ten-minute governed recovery sweep" and .name != "Log Commit" and .name != "Push on main" and .name != "Log CI parts")' <<<"$runs" >/dev/null; then
               echo 'sweep3159_skip=competing_main_workflow'
               exit 0
             fi
@@ -177,7 +355,9 @@ jobs:
           set -euo pipefail
           api="https://api.github.com/repos/$GITHUB_REPOSITORY"
           statuses=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/124fb31441ff637ce0b60483fd7c3643815ee9c2/status")
-          deployed=cfef3e3da13b5ad16c12a837fcf84aec8044d608
+          runs=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" "$api/actions/runs?branch=main&event=push&status=success&per_page=100")
+          deployed=$(jq -er '[.workflow_runs[] | select(.name=="Deploy Pipeline Runner via Ops Dashboard" and .head_branch=="main" and .conclusion=="success")][0].head_sha' <<<"$runs")
+          [[ "$deployed" =~ ^[0-9a-f]{40}$ ]]
           git fetch --quiet --depth=1 origin "$deployed"
           git diff --exit-code "$deployed" "$GITHUB_SHA" -- services/pipeline-runner
           deployed_status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "$api/commits/$deployed/status")
