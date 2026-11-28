@@ -1,0 +1,183 @@
+name: Issue 3159 exact provider and overdue triage readback
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/issue3159-provider-readback.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-provider-readback.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: python repair/scripts/issue3159_cron_containment.py selftest
+      - name: Exercise exact bridge code offline without secrets
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          text=Path('.github/workflows/issue3159-provider-readback.yml').read_text()
+          body=text.split('cat >/tmp/outage-health-worker.js <<EOF\n',1)[1].split('\n          EOF',1)[0]
+          code='\n'.join(line[10:] for line in body.splitlines()).replace('$TOKEN','test-token')
+          Path('/tmp/outage-bridge.mjs').write_text(code)
+          PY
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import bridge from '/tmp/outage-bridge.mjs';
+          let calls=0;
+          const env={STUDIO_API:{fetch:async r=>{
+            calls++;
+            assert.equal(r.method,'GET');
+            const u=new URL(r.url);
+            if(u.pathname==='/api/health') return Response.json({ok:true,windows_outage:{active:true,resumed_at:null}});
+            if(u.pathname==='/api/admin/exception-recovery/rec0zq77NEKd3tB6Q/receipt') {
+              assert.equal(u.search,'?authenticated=1');
+              return Response.json({output_id:10204,verified_public:false,ownership_verified:true,verification:{no_output_write:true,authoritative_state_unchanged:true},private_field:'must-not-leak'});
+            }
+            assert.equal(u.pathname,'/api/admin/approved-past-due/triage');
+            return Response.json({status:'ok',source_of_truth:'supabase',read_only:true,publish_actions_enabled:false,total:1,groups:[{group:'test',count:1}],items:[{private_field:'must-not-leak'}]});
+          }}};
+          for (const [path,method] of [['/wrong','GET'],['/test-token','POST'],['/test-token?x=1','GET']]){
+            const denied=await bridge.fetch(new Request('https://probe.example'+path,{method}),env);
+            assert.equal(denied.status,404);
+            assert.equal(denied.headers.get('X-Outage-Probe'),'denied');
+          }
+          assert.equal(calls,0);
+          const response=await bridge.fetch(new Request('https://probe.example/test-token'),env);
+          const result=await response.json();
+          assert.equal(result.receipt.output_id,10204);
+          assert.equal(result.receipt.no_output_write,true);
+          assert.equal(result.triage.total,1);
+          assert.equal(result.triage.publish_actions_enabled,false);
+          assert.equal(JSON.stringify(result).includes('must-not-leak'),false);
+          assert.equal(calls,3);
+          console.log('exact receipt and triage scope PASS');
+          JS
+  readback:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: preflight
+    permissions:
+      contents: read
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Read exact live cron inventory
+        run: |
+          set -euo pipefail
+          PYTHONPATH=repair/scripts python - <<'PY'
+          import datetime, json
+          from issue3159_cron_containment import call, schedules
+          crons=schedules(call('GET'))
+          print('checked_at='+datetime.datetime.now(datetime.timezone.utc).isoformat())
+          print('verified_crons='+json.dumps(crons))
+          if crons:
+              raise SystemExit('Scheduler not paused')
+          PY
+      - name: Create exact receipt and triage service-binding probe
+        id: bridge
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NAME="studio-outage-receipt-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$TOKEN"
+          printf '%s' "$TOKEN" >/tmp/outage-health-token
+          # Never overwrite any existing script, even an earlier diagnostic.
+          CODE=$(curl -sS --max-time 20 -o /tmp/outage-probe-exists.json -w '%{http_code}' "$API/workers/scripts/$NAME/settings" -H "$AUTH")
+          test "$CODE" = 404
+          printf '%s' "$NAME" >/tmp/outage-health-owned-name
+          cat >/tmp/outage-health-worker.js <<EOF
+          export default {
+            async fetch(request, env) {
+              const u = new URL(request.url);
+              if (request.method !== 'GET' || u.pathname !== '/$TOKEN' || u.search) return new Response('Not found', {status:404,headers:{'X-Outage-Probe':'denied','Cache-Control':'no-store'}});
+              const health=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/health',{method:'GET',headers:{Accept:'application/json'}}));
+              const h=await health.json().catch(()=>({}));
+              if(health.status!==200 || h.ok!==true || h.windows_outage?.active!==true || h.windows_outage?.resumed_at!==null) return Response.json({error:'outage_fence_unverified'},{status:503});
+              const headers={Accept:'application/json',Origin:'https://studio.chicagoshining.com','Cf-Access-Authenticated-User-Email':'joseph.t.logan@gmail.com'};
+              const r=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/admin/exception-recovery/rec0zq77NEKd3tB6Q/receipt?authenticated=1',{method:'GET',headers}));
+              const d=await r.json().catch(()=>({}));
+              const t=await env.STUDIO_API.fetch(new Request('https://studio.chicagoshining.com/api/admin/approved-past-due/triage?limit=1',{method:'GET',headers}));
+              const x=await t.json().catch(()=>({}));
+              const receipt={http:r.status,output_id:d.output_id??null,verified_public:d.verified_public===true,verified_delivery:d.verified_delivery===true,ownership_verified:d.ownership_verified===true,evidence:typeof d.evidence==='string'&&/^[a-z0-9_]{1,120}$/i.test(d.evidence)?d.evidence:null,no_output_write:d.verification?.no_output_write===true,unchanged:d.verification?.authoritative_state_unchanged===true,eligible:d.verification?.eligible===true};
+              const triage={http:t.status,status:x.status??null,source:x.source_of_truth??null,read_only:x.read_only===true,publish_actions_enabled:x.publish_actions_enabled??null,total:x.total??null,groups:(Array.isArray(x.groups)?x.groups:[]).map(y=>({group:y.group,count:y.count,platforms:y.platforms??{}}))};
+              return Response.json({receipt,triage},{headers:{'Cache-Control':'no-store'}});
+            }
+          };
+          EOF
+          node --input-type=module --check </tmp/outage-health-worker.js
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/outage-health-metadata.json
+          curl -fsS --max-time 25 -X PUT "$API/workers/scripts/$NAME/content" -H "$AUTH" -F 'metadata=@/tmp/outage-health-metadata.json;type=application/json' -F 'worker.js=@/tmp/outage-health-worker.js;type=application/javascript+module;filename=worker.js' -o /tmp/outage-health-upload.json
+          jq -e '.success==true' /tmp/outage-health-upload.json >/dev/null
+          curl -fsS --max-time 25 -X POST "$API/workers/scripts/$NAME/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/outage-health-enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/outage-health-enabled.json >/dev/null
+          curl -fsS --max-time 20 "$API/workers/subdomain" -H "$AUTH" -o /tmp/outage-health-subdomain.json
+          SUBDOMAIN=$(jq -er '.result.subdomain' /tmp/outage-health-subdomain.json)
+          [[ "$SUBDOMAIN" =~ ^[a-z0-9-]+$ ]]
+          BASE="https://$NAME.$SUBDOMAIN.workers.dev"
+          READY=false
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            CODE=$(curl -sS --max-time 10 -D /tmp/outage-health-denied.headers -o /tmp/outage-health-denied.json -w '%{http_code}' "$BASE/not-authorized" || true)
+            echo "bridge_denial_http=$CODE attempt=$i"
+            if [[ "$CODE" == 404 ]] && grep -qi '^x-outage-probe: denied' /tmp/outage-health-denied.headers; then
+              READY=true
+              break
+            fi
+            sleep 5
+          done
+          test "$READY" = true
+          CODE=$(curl -sS --max-time 150 -o /tmp/outage-health-result.json -w '%{http_code}' "$BASE/$TOKEN")
+          echo "bridge_health_http=$CODE"
+          test "$CODE" = 200
+          jq -c '.receipt' /tmp/outage-health-result.json
+          jq -c '.triage' /tmp/outage-health-result.json
+          jq -e '.receipt.http==200 and .receipt.output_id==10204 and .receipt.no_output_write==true and .receipt.unchanged==true and .triage.http==200 and .triage.status=="ok" and .triage.source=="supabase" and .triage.read_only==true and .triage.publish_actions_enabled==false and (.triage.total==([.triage.groups[].count]|add))' /tmp/outage-health-result.json >/dev/null
+          echo 'provider_triage_readback=PASS'
+      - name: Remove temporary health probe and verify absence
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ ! -f /tmp/outage-health-owned-name ]]; then exit 0; fi
+          NAME=$(cat /tmp/outage-health-owned-name)
+          test "$NAME" = "studio-outage-receipt-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE=$(curl -sS --max-time 20 -X DELETE "$API/workers/scripts/$NAME" -H "$AUTH" -o /tmp/outage-health-delete.json -w '%{http_code}')
+          if [[ "$CODE" != 404 ]]; then
+            [[ "$CODE" -ge 200 && "$CODE" -lt 300 ]]
+            jq -e '.success==true' /tmp/outage-health-delete.json >/dev/null
+          fi
+          CODE=$(curl -sS --max-time 20 "$API/workers/scripts/$NAME/settings" -H "$AUTH" -o /tmp/outage-health-gone.json -w '%{http_code}')
+          test "$CODE" = 404
+          echo 'temporary_health_probe_removed=PASS'
+          PYTHONPATH=repair/scripts python - <<'PY'
+          import json
+          from issue3159_cron_containment import call, schedules
+          crons=schedules(call('GET'))
+          print('final_verified_crons='+json.dumps(crons))
+          assert crons==[]
+          PY
+      - name: Publish readback result and evidence link
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-provider-readback",target_url:$url,description:"Read-only outage health and cron evidence"}' >/tmp/receipt.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/receipt.json >/dev/null
