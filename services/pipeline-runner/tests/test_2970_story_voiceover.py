@@ -549,3 +549,37 @@ def test_3159_new_cached_story_scope_and_no_paid_fallback(monkeypatch, request_i
     ctx["outputs"][0]["fields"]["Review_Status"]="Pending Review"
     with pytest.raises(steps.StepBlocked):
         steps._verified_story_recovery_scope(ctx)
+
+
+@pytest.mark.parametrize("request_id", ["rec9iM9aQBPhA1e2q","recuuGJr8rUO5ZV4r"])
+def test_3159_exact_history_pair_preserves_approved_scope(monkeypatch, request_id):
+    from studio_produce import steps
+    from studio_produce.story_history_recovery import HISTORY_RECOVERY
+    ctx=exact_3159_context()
+    jid,pid,siblings=steps._EXACT_3159_HISTORY_SCOPES[request_id]
+    evidence=HISTORY_RECOVERY[pid]
+    ctx["request_id"]=request_id
+    ctx["job"]["job_id"]=jid
+    ctx["parent"]["id"]=pid
+    rows=ctx["outputs"][:4]
+    for row,ident in zip(rows,sorted(siblings)): row["id"]=ident
+    digest=evidence["fingerprint"]
+    url=f"https://media.chicagoshining.com/studio/previews/story-voiceover/{pid}/{digest}.mp3"
+    for i,ident in enumerate(sorted(evidence["outputs"])):
+        row=output(Content_Item=[pid], Output_Status="In Production", Render_Status="Blocked",
+                   Do_Not_Publish=True, Auto_Publish_Enabled=False, Publish_Status="Not Ready",
+                   Remotion_Error_Message="Studio Story narration integrity guard: Story narration preparation failed; reconcile its exact attempt")
+        row["id"]=ident
+        if i==0: row["fields"][story.RECEIPT]=json.dumps({"fingerprint":digest,"url":url,"state":"failed"})
+        rows.append(row)
+    ctx["outputs"]=rows
+    monkeypatch.setattr(steps,"_output_missing_review_cover",lambda _:False)
+    assert steps._verified_story_recovery_scope(ctx)==frozenset(evidence["outputs"])
+    rows[-1]["fields"]["Do_Not_Publish"]=False
+    with pytest.raises(steps.StepBlocked): steps._verified_story_recovery_scope(ctx)
+    rows[-1]["fields"]["Do_Not_Publish"]=True
+    rows[-1]["fields"][story.RECEIPT]=json.dumps({"fingerprint":digest,"url":url,"state":"verified","sha256":"a"*64})
+    with pytest.raises(steps.StepBlocked): steps._verified_story_recovery_scope(ctx)
+    rows[-1]["fields"][story.RECEIPT]=json.dumps({"fingerprint":digest,"url":url,"state":"verified","sha256":"a"*64,
+        "history_original_sha256":evidence["sha256"],"history_created_at":evidence["created_at"]})
+    assert steps._verified_story_recovery_scope(ctx)==frozenset(evidence["outputs"])

@@ -1,0 +1,171 @@
+name: Issue 3159 governed Story 11202 pair recovery
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'repair/scripts/issue3159-story11202-pair-probe.py'
+      - '.github/workflows/issue3159-story11202-pair-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue3159-story11202-pair-probe.yml'
+      - 'repair/scripts/issue3159-story11202-pair-probe.py'
+permissions:
+  contents: read
+  statuses: write
+concurrency:
+  group: chicagoshining-studio-api-production-deploy
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m py_compile repair/scripts/issue3159-story11202-pair-probe.py
+          python -m pip install -q pillow
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          text=Path('repair/scripts/issue3159-story11202-pair-probe.py').read_text()
+          ast.parse(text)
+          assert text.count('requests.post(')==1 and '/jobs/studio-produce/resume' in text
+          assert 'marker.open("x"' in text and 'before_owner_gate' in text
+          for forbidden in ('requests.patch','requests.put','requests.delete','/publish-now','force-release','confirm_half_open_progress','DELETE FROM','UPDATE producer_jobs'):
+              assert forbidden not in text
+          tree=ast.parse(text)
+          fn=next(x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name=='observe_governor')
+          ns={}
+          exec(compile(ast.Module(body=[fn],type_ignores=[]),'monitor','exec'),ns)
+          check=ns['observe_governor']
+          idle=dict(ok=True,enabled=True,active_jobs=0,active_worker_heavy=0,combined_heavy_active=0,queued_jobs=0,paused_jobs=18,max_jobs=2,worker_heavy_limit=1,database_circuit_phase='closed',admission_paused=False,smv1_maintenance_active=False)
+          assert not check(idle)[1]
+          assert not check(dict(idle,active_jobs=1,active_worker_heavy=1,combined_heavy_active=2,queued_jobs=3))[1]
+          assert not check(dict(idle,active_jobs=2,combined_heavy_active=2))[1]
+          assert 'capacity_exceeded' in check(dict(idle,active_jobs=2,active_worker_heavy=1,combined_heavy_active=3))[1]
+          assert 'counter_mismatch' in check(dict(idle,active_jobs=1))[1]
+          assert 'circuit_not_closed' in check(dict(idle,database_circuit_phase='open'))[1]
+          assert 'counter_contract' in check(dict(idle,active_jobs=None))[1]
+          assert 'capacity_config' in check(dict(idle,max_jobs=3))[1]
+          print('STORY11202_READONLY_MONITOR_PASS')
+          PY
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require deployed exact history pair Runner scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 100); do
+            status=$(curl -fsS --max-time 15 -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/status" | jq -r '[.statuses[] | select(.context=="production/pipeline-runner")][0].state // "pending"')
+            [[ "$status" != failure && "$status" != error ]] || exit 1
+            [[ "$status" == success ]] && break
+            sleep 5
+          done
+          test "$status" = success
+      - name: Verify scheduler still minute-only before exact recovery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_pre_crons=minute_only')
+          PY
+      - name: Exact one-shot Story 11202 pair recovery through protected Ops
+        shell: bash
+        env:
+          OPS_TOKEN_A: ${{ secrets.OPS_DASHBOARD_TOKEN }}
+          OPS_TOKEN_B: ${{ secrets.DASHBOARD_TOKEN }}
+          OPS_TOKEN_C: ${{ secrets.OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE=https://ops.chicagoshining.com
+          selected=''
+          for candidate in "${OPS_TOKEN_A:-}" "${OPS_TOKEN_B:-}" "${OPS_TOKEN_C:-}"; do
+            [[ -n "$candidate" ]] || continue
+            code=$(curl -sS --max-time 20 -o /tmp/catalog.json -w '%{http_code}' -H "Authorization: Bearer $candidate" "$BASE/api/catalog" || true)
+            if [[ "$code" == 200 ]] && jq -e '.ok==true' /tmp/catalog.json >/dev/null 2>&1; then selected="$candidate"; break; fi
+          done
+          test -n "$selected"
+          python - <<'PY'
+          import hashlib,json,os,re
+          from pathlib import Path
+          source=Path('repair/scripts/issue3159-story11202-pair-probe.py')
+          sha=os.environ['GITHUB_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          expected=hashlib.sha256(source.read_bytes()).hexdigest()
+          url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          command=("$ErrorActionPreference='Stop';"
+            "$tmp=Join-Path $env:TEMP ('issue3159-story11202-'+[guid]::NewGuid().ToString('N')+'.py');"
+            f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
+            f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
+            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+          Path('/tmp/request.json').write_text(json.dumps({'command':command,'confirm':True}))
+          PY
+          job=''
+          for attempt in $(seq 1 3); do
+            code=$(curl -sS --max-time 20 -o /tmp/start.json -w '%{http_code}' -X POST "$BASE/api/shell" -H "Authorization: Bearer $selected" -H 'Content-Type: application/json' --data-binary @/tmp/request.json || true)
+            if [[ "$code" == 202 ]]; then job=$(jq -er '.job.id' /tmp/start.json); break; fi
+            [[ "$code" == 409 ]] || { echo "audit_ops_http=$code"; exit 1; }
+            sleep 5
+          done
+          test -n "$job"
+          echo "audit_job_id=$job"
+          for attempt in $(seq 1 120); do
+            curl -fsS --max-time 20 -H "Authorization: Bearer $selected" "$BASE/api/jobs/$job" -o /tmp/status.json
+            state=$(jq -r '.job.status' /tmp/status.json)
+            [[ "$state" == ok || "$state" == failed ]] && break
+            sleep 3
+          done
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          job=json.loads(Path('/tmp/status.json').read_text())['job']
+          out=job.get('log','')
+          lines=out.splitlines()
+          for line in lines:
+              if re.fullmatch(r'STORY3159_ERROR=[A-Za-z_]+',line) or line=='STORY3159_ACCEPTED_ONCE=rec9iM9aQBPhA1e2q':
+                  print(line)
+              elif re.fullmatch(r'STORY3159_(AUDIO|GOVERNOR|PROOF)=\{.*\}',line):
+                  print(line)
+          if job['status']!='ok': raise SystemExit('exact_story_probe_incomplete_no_automatic_retry')
+          proofs=[line for line in lines if line.startswith('STORY3159_PROOF=')]
+          assert len(proofs)==1
+          proof=json.loads(proofs[0].split('=',1)[1])
+          assert proof['output']==11202 and proof['circuit']=='closed'
+          assert proof['outputs']==[11202,11203] and proof['sibling_records_unchanged']==4 and proof['hold_preserved'] and proof['approval_required'] and proof['submissions']==1
+          assert set(proof['media'])=={'11202','11203'} and all(v['frames']==300 and v['render_job'].startswith('job-') for v in proof['media'].values())
+          PY
+      - name: Verify final scheduler remains minute-only
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PYTHONPATH=repair/scripts python - <<'PY'
+          from issue3159_cron_containment import call,schedules
+          assert schedules(call('GET'))==['* * * * *']
+          print('story3159_post_crons=minute_only')
+          PY
+      - name: Record protected evidence status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          STATE=failure
+          if [[ "$RESULT" == success ]]; then STATE=success; fi
+          jq -nc --arg state "$STATE" --arg url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{state:$state,context:"production/issue3159-story11202-pair-probe",target_url:$url,description:"Exact Story 11202 pair recovery"}' >/tmp/media-status.json
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Content-Type: application/json' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" --data-binary @/tmp/media-status.json >/dev/null
