@@ -1,4 +1,5 @@
 import { readStudioWorkerSource } from "./worker-source-reader.mjs";
+import { windowsOutageCronInventoryAllowed } from "./windows-outage-control.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -44,7 +45,13 @@ test("production Worker keeps five-minute Studio cron and isolates Factory one-m
   // assertions below still test the one-minute and five-minute behaviors.
   assert.match(deployWorkflow, /crons=schedules\(call\('GET'\)\)/);
   assert.ok(deployWorkflow.includes("'triggers':{'crons':json.loads(Path('/tmp/production-crons-before.json').read_text())}"));
-  assert.ok(deployWorkflow.includes("true) jq -e '. == []' /tmp/production-crons-before.json"));
+  assert.ok(deployWorkflow.includes('if (!windowsOutageCronInventoryAllowed(JSON.parse(readFileSync("/tmp/production-crons-before.json","utf8")))) process.exit(1);'));
+  const now = Date.parse("2026-11-28T14:00:00Z");
+  assert.equal(windowsOutageCronInventoryAllowed([], now, null, false), true);
+  assert.equal(windowsOutageCronInventoryAllowed(["* * * * *"], now, null, false), false);
+  assert.equal(windowsOutageCronInventoryAllowed(["* * * * *"], now, null, true), true);
+  assert.equal(windowsOutageCronInventoryAllowed(["*/5 * * * *"], now, null, true), false);
+  assert.equal(windowsOutageCronInventoryAllowed(["* * * * *", "*/5 * * * *", "0 6 * * *"], now, null, true), false);
   assert.ok(deployWorkflow.includes("if schedules(call('GET')) != expected or config['triggers']['crons'] != expected:"));
   assert.ok(deployWorkflow.includes("if observed != expected:"));
   assert.doesNotMatch(deployWorkflow, /'crons':\s*\[/);
