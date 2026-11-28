@@ -1,4 +1,5 @@
 import { windowsOutageState, windowsOutageProductionPaused } from "./windows-outage-control.mjs";
+import { runStagedGalleryRecovery } from "./staged-gallery-recovery.mjs";
 import { exactZooFactoryDrain } from "./issue3093-exact-factory-drain.mjs";
 import { handleQaApi } from "./qa-http.mjs";
 import { automaticPhotoWaitCreateEnabled, automaticPhotoWaitExistingEnabled } from "./automatic-photo-wait-create.mjs";
@@ -1460,9 +1461,9 @@ export default {
           // breadcrumb for legacy version-presence regression tests; the
           // authoritative live health version below is the new release.
           // Previous release: 0.10.996-produce-fair-recovery.
-          version: "0.10.1051-staged-render-quality-recovery-3159",
+          version: "0.10.1052-staged-native-gallery-3159",
           airtable_activity: airtableActivity,
-          windows_outage: { ...windowsOutageState(), production_paused: windowsOutageProductionPaused(), recovery_stage: 2 },
+          windows_outage: { ...windowsOutageState(), production_paused: windowsOutageProductionPaused(), recovery_stage: 3 },
           rendering_review: { admission_enabled: reviewEnrollmentWriteEnabled(env), automatic_sampling_percent: 0, integration_verified: env.RENDERING_REVIEW_INTEGRATION_VERIFIED==="true", publication_guard_version: "2026-10-28-final-readback" },
           quality_failed_output_scan_v2: true,
           qa_ig_stale_upload_scan_v1: env.STUDIO_IG_STALE_UPLOAD_SCAN_ENABLED !== "false",
@@ -4766,6 +4767,12 @@ export default {
           } catch (error) { console.warn("3159 staged production recovery deferred", String(error?.message || error)); }
         })());
         ctx.waitUntil(factoryBatchCronResume(env, ctx).catch(error => console.warn("3159 staged Factory recovery deferred", String(error?.message || error))));
+        // Stage 3: exact fresh-slot native gallery lane; global publication remains fenced.
+        if (collectorMinute % 5 === 0) {
+          ctx.waitUntil(runStagedGalleryRecovery(env)
+            .then(result=>console.info("3159 staged native gallery",JSON.stringify(result)))
+            .catch(()=>console.warn("3159 staged native gallery unavailable")));
+        }
         // Stage 2: restore only bounded non-publishing maintenance. Spread
         // metadata repair, render admission and read-only QA across separate
         // minute slots; retain the existing single Remotion slot and broker.
