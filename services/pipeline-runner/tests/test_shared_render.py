@@ -372,3 +372,35 @@ def test_propagation_fails_closed_when_live_sibling_identity_is_wrong():
     with pytest.raises(RuntimeError, match="sibling identity"):
         propagate_render_result(client, source, ["recExpected"])
     client.update_record.assert_not_called()
+
+
+def test_exact_storage_scope_excludes_all_four_approved_siblings(monkeypatch):
+    import json
+    import pytest
+    from studio_produce import steps, story_voiceover
+
+    rid, (job, parent_id, targets, siblings) = next(iter(steps._EXACT_3159_STORAGE_SCOPES.items()))
+    monkeypatch.setattr(steps, "_output_missing_review_cover", lambda _: False)
+    parent = _output(id=parent_id, Voiceover_URL="https://example.test/parent.mp3")
+    rows = [_output(id=i, Output_Status="Approved for Publishing", Review_Status="Approved",
+                    Render_Status="Rendered", Final_File_URL="https://example.test/approved.mp4")
+            for i in siblings]
+    stories = [_output(id=i, Content_Item=[parent_id], Studio_Output_Type="Story",
+        Studio_Effective_Voiceover_Mode="Yes", Output_Filename="studio-story.mp4",
+        Output_Status="In Production", Render_Status="Blocked",
+        Remotion_Error_Message=story_voiceover.STORY_STORAGE_GUARD, Do_Not_Publish=True,
+        Auto_Publish_Enabled=False, Publish_Status="Not Ready") for i in targets]
+    ctx = {"request_id":rid, "job":{"job_id":job}, "parent":parent, "outputs":rows+stories}
+    assert steps._verified_story_recovery_scope(ctx) == frozenset(targets)
+    stories[0]["fields"]["Render_Status"] = "Ready for Render"
+    assert steps._verified_story_recovery_scope(ctx) == frozenset(targets)
+    ident = stories[0]["id"]
+    digest = story_voiceover.HELD_STORAGE_RECOVERY[ident][1]
+    stories[0]["fields"][story_voiceover.RECEIPT] = json.dumps({
+        "state":"verified", "fingerprint":digest, "sha256":"a"*64,
+        "url":f"https://media.chicagoshining.com/studio/previews/story-voiceover/{parent_id}/{digest}.mp3"})
+    stories[0]["fields"]["Render_Status"] = "Rendering"
+    assert steps._verified_story_recovery_scope(ctx) == frozenset(targets)
+    rows[0]["fields"]["Output_Status"] = "Ready for Review"
+    with pytest.raises(steps.StepBlocked, match="approved sibling"):
+        steps._verified_story_recovery_scope(ctx)
