@@ -4,12 +4,14 @@ on:
     branches: [main]
     paths:
       - 'repair/scripts/issue3093-exact-factory-drain.py'
+      - 'repair/scripts/issue3093-exact-factory-bridge.mjs'
       - '.github/workflows/issue3093-exact-factory-drain.yml'
   push:
     branches: [main]
     paths:
       - '.github/workflows/issue3093-exact-factory-drain.yml'
       - 'repair/scripts/issue3093-exact-factory-drain.py'
+      - 'repair/scripts/issue3093-exact-factory-bridge.mjs'
 permissions:
   contents: read
   statuses: write
@@ -39,6 +41,28 @@ jobs:
               assert forbidden not in text
           print('EXACT_ZOO_FACTORY_SCOPE_PASS')
           PY
+      - name: Test exact bridge scope without credentials
+        run: |
+          node --input-type=module <<'JS'
+          import assert from "node:assert/strict";
+          import bridge from "./repair/scripts/issue3093-exact-factory-bridge.mjs";
+          const secret="test-only-service-secret-of-32-chars";
+          let calls=0;
+          const env={STUDIO_API:{fetch:async r=>{
+            calls++;
+            assert.equal(r.url,"https://studio.chicagoshining.com/api/internal/factory/zoo3093-resume");
+            assert.equal(r.method,"POST");
+            assert.equal(r.headers.get("X-Pipeline-Secret"),secret);
+            assert.equal(await r.text(),"");
+            return Response.json({ok:true,request_id:"exact",approved:6,pending:0,complete:true,publication_authorized:false,private:"not-for-output"});
+          }}};
+          for(const [path,method,header,body] of [["/wrong","POST",secret,""],["/__ZOO_TOKEN__","GET",secret,undefined],["/__ZOO_TOKEN__?x=1","POST",secret,""],["/__ZOO_TOKEN__","POST","bad",""],["/__ZOO_TOKEN__","POST",secret,"{}"]]){
+            assert.equal((await bridge.fetch(new Request("https://test.example"+path,{method,headers:{"X-Pipeline-Secret":header},body}),env)).status,404);
+          }
+          assert.equal(calls,0);
+          const r=await bridge.fetch(new Request("https://test.example/__ZOO_TOKEN__",{method:"POST",headers:{"X-Pipeline-Secret":secret}}),env);
+          assert.equal(r.status,200);const d=await r.json();assert.equal(d.complete,true);assert.equal(d.private,undefined);assert.equal(calls,1);
+          JS
   audit:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: validate
@@ -70,6 +94,39 @@ jobs:
           assert schedules(call('GET'))==[]
           print('zoo_factory_pre_crons=[]')
           PY
+      - name: Create bounded exact service-binding transport
+        id: bridge
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          NAME="studio-zoo-factory-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          CODE=$(curl -sS --max-time 20 -o /tmp/zoo-bridge-exists.json -w '%{http_code}' "$API/workers/scripts/$NAME/settings" -H "$AUTH")
+          test "$CODE" = 404
+          printf '%s' "$NAME" >/tmp/zoo-bridge-owned-name
+          TOKEN=$(python -c 'import secrets;print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$TOKEN"
+          sed "s/__ZOO_TOKEN__/$TOKEN/g" repair/scripts/issue3093-exact-factory-bridge.mjs >/tmp/zoo-bridge.js
+          printf '%s' '{"main_module":"worker.js","compatibility_date":"2026-08-02","bindings":[{"type":"service","name":"STUDIO_API","service":"chicagoshining-studio-api"}]}' >/tmp/zoo-bridge-metadata.json
+          curl -fsS --max-time 25 -X PUT "$API/workers/scripts/$NAME/content" -H "$AUTH" -F 'metadata=@/tmp/zoo-bridge-metadata.json;type=application/json' -F 'worker.js=@/tmp/zoo-bridge.js;type=application/javascript+module;filename=worker.js' -o /tmp/zoo-bridge-upload.json
+          jq -e '.success==true' /tmp/zoo-bridge-upload.json >/dev/null
+          curl -fsS --max-time 25 -X POST "$API/workers/scripts/$NAME/subdomain" -H "$AUTH" -H 'Content-Type: application/json' --data '{"enabled":true,"previews_enabled":false}' -o /tmp/zoo-bridge-enabled.json
+          jq -e '.success==true and .result.enabled==true' /tmp/zoo-bridge-enabled.json >/dev/null
+          SUBDOMAIN=$(curl -fsS --max-time 20 "$API/workers/subdomain" -H "$AUTH" | jq -er '.result.subdomain')
+          [[ "$SUBDOMAIN" =~ ^[a-z0-9-]+$ ]]
+          BASE="https://$NAME.$SUBDOMAIN.workers.dev"
+          READY=false
+          for i in $(seq 1 12); do
+            CODE=$(curl -sS --max-time 10 -D /tmp/zoo-bridge-denied.headers -o /dev/null -w '%{http_code}' "$BASE/not-authorized" || true)
+            if [[ "$CODE" == 404 ]] && grep -qi '^x-zoo-bridge: denied' /tmp/zoo-bridge-denied.headers; then READY=true; break; fi
+            sleep 5
+          done
+          test "$READY" = true
+          echo "::add-mask::$BASE/$TOKEN"
+          printf '%s' "$BASE/$TOKEN" >/tmp/zoo-bridge-url
       - name: Exact one-shot Zoo Miami recovery through protected Ops
         shell: bash
         env:
@@ -94,11 +151,14 @@ jobs:
           assert re.fullmatch(r'[0-9a-f]{40}',sha)
           expected=hashlib.sha256(source.read_bytes()).hexdigest()
           url=f'https://raw.githubusercontent.com/jtl6713/SM-Pipeline-V2/{sha}/{source.as_posix()}'
+          bridge_url=Path('/tmp/zoo-bridge-url').read_text()
+          assert re.fullmatch(r'https://studio-zoo-factory-[0-9]+-[0-9]+\.[a-z0-9-]+\.workers\.dev/[A-Za-z0-9_-]{43}',bridge_url)
           command=("$ErrorActionPreference='Stop';"
             "$tmp=Join-Path $env:TEMP ('issue3093-zoo2340-'+[guid]::NewGuid().ToString('N')+'.py');"
             f"Invoke-WebRequest -Uri '{url}' -OutFile $tmp -UseBasicParsing -TimeoutSec 55;"
             f"if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{expected}'){{throw 'audit_source_hash_mismatch'}};"
-            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
+            f"$env:ZOO_FACTORY_BRIDGE_URL='{bridge_url}';"
+            "try{& python $tmp;if($LASTEXITCODE -ne 0){throw 'audit_python_failed'}}finally{Remove-Item Env:ZOO_FACTORY_BRIDGE_URL -ErrorAction SilentlyContinue;Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue}")
           Path('/tmp/request.json').write_text(json.dumps({'command':command,'confirm':True}))
           PY
           job=''
@@ -131,6 +191,27 @@ jobs:
           proof=json.loads(proofs[0].split('=',1)[1])
           assert proof['request_id']=='e3aff4f8-a9c4-4333-876d-e0523144f293' and proof['approved']==list(range(11366,11372)) and proof['complete'] and not proof['publication_authorized']
           PY
+      - name: Remove owned temporary transport and verify absence
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f /tmp/zoo-bridge-owned-name ]]; then exit 0; fi
+          NAME=$(cat /tmp/zoo-bridge-owned-name)
+          test "$NAME" = "studio-zoo-factory-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          CODE=$(curl -sS --max-time 20 -X DELETE "$API/workers/scripts/$NAME" -H "$AUTH" -o /tmp/zoo-bridge-delete.json -w '%{http_code}')
+          if [[ "$CODE" != 404 ]]; then
+            [[ "$CODE" -ge 200 && "$CODE" -lt 300 ]]
+            jq -e '.success==true' /tmp/zoo-bridge-delete.json >/dev/null
+          fi
+          CODE=$(curl -sS --max-time 20 "$API/workers/scripts/$NAME/settings" -H "$AUTH" -o /tmp/zoo-bridge-gone.json -w '%{http_code}')
+          test "$CODE" = 404
+          rm -f /tmp/zoo-bridge-url /tmp/zoo-bridge.js
+          echo 'zoo_factory_bridge_removed=PASS'
       - name: Verify final scheduler remains paused
         if: always()
         env:
