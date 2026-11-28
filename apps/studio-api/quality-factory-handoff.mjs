@@ -194,6 +194,35 @@ export function assessProductionFactoryHandoff({
         remediation:"Reconcile exact provider attempt, existing publication evidence, rights and current media revision via the guarded publishing recovery path; preserve original approval and any hold; no blind retry or new production fanout"}));
       continue;
     }
+    // #3159: an old date or approval is evidence, not a valid render or
+    // permission to replay. Diagnose these conflicts before the generic
+    // terminal/production checks, without modifying any canonical field.
+    const story = str(row.studio_output_type)==="Story" ||
+      /^(Instagram|Facebook) Story$/i.test(str(row.platform_output_type));
+    const noProviderEvidence = !row.published_at && !row.platform_post_url;
+    const priorApproval = str(row.review_status)==="Approved" ||
+      str(row.output_status)==="Approved for Publishing" || Boolean(row.production_approved_at);
+    const legacyDate = Boolean(row.scheduled_post_date);
+    const studioDate = Boolean(row.studio_scheduled_at || row.youtube_scheduled_publish_at);
+    if(story && noProviderEvidence &&
+       /^(blocked|failed|error)$/i.test(str(row.render_status)) &&
+       (priorApproval || legacyDate || studioDate || /^(ready to publish|scheduled|ready to schedule)$/i.test(str(row.publish_status)))) {
+      report.findings.push(incident({stage:"produce",kind:"production_factory_handoff",
+        reason:"blocked_story_lifecycle_conflict_requires_reconciliation",output:row,
+        remediation:"Reconcile exact original narration attempt, production approval and legacy versus canonical scheduling evidence before any recovery admission; preserve original approval and dates, no blind reset, synthesis or provider retry",
+        more:{approval_evidence_present:priorApproval,legacy_schedule_present:legacyDate,
+          canonical_schedule_present:studioDate,preserve_existing_approval:true,preserve_existing_schedule:true}}));
+      continue;
+    }
+    if(noProviderEvidence && str(row.output_status)==="Ready for Review" &&
+       str(row.review_status)==="Approved" && str(row.render_status)==="Rendered" &&
+       row.auto_publish_enabled===true && legacyDate && studioDate) {
+      report.findings.push(incident({stage:"factory",kind:"production_factory_handoff",
+        reason:"approved_rendered_sibling_lifecycle_drift",output:row,
+        remediation:"Recover exact original approved artifact and lifecycle history; preserve approval and schedule evidence, verify artifact identity, never re-render or reapprove a sibling automatically",
+        more:{preserve_existing_approval:true,preserve_existing_schedule:true,preserve_existing_artifact:true}}));
+      continue;
+    }
     if(terminalOutput(row)) {
       alreadyPastFactory++;
       continue; // do not rewind approved/published siblings
@@ -368,7 +397,7 @@ export async function scanRecentProductionFactoryHandoffs({
     +"render_status,review_status,publish_status,do_not_publish,auto_publish_enabled,tiktok_draft_status,"
     +"output_caption,studio_preview_url,thumbnail_url,final_file_url,"
     +"selected_clip_count,scheduled_post_date,studio_scheduled_at,"
-    +"published_at,platform_post_url,test_run_id,youtube_scheduled_publish_at"
+    +"published_at,platform_post_url,test_run_id,youtube_scheduled_publish_at,production_approved_at"
     +"&order=output_number.desc.nullslast&limit="+outputLimit);
   if(!Array.isArray(outputs)) throw Error("handoff output inventory unavailable");
   if(outputs.length>=outputLimit)
