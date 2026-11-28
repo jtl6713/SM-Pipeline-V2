@@ -30,3 +30,19 @@ test("reject unauthenticated, caller scope, changed owner, or wrong group before
   assert.equal(f.calls,0);
  }
 });
+
+
+test("exact Zoo POST passes legacy method admission and remains service-authenticated",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const source=await readFile(new URL("./worker.js",import.meta.url),"utf8");
+ const {runInNewContext}=await import("node:vm");
+ const start=source.indexOf("const isExactZooFactoryResumePost =");
+ const end=source.indexOf("const allowedMethod =",start);
+ assert.ok(start>=0&&end>start);
+ const pred=source.slice(start,end)+"\nisExactZooFactoryResumePost";
+ for(const [method,pathname,expected] of [["POST","/api/internal/factory/zoo3093-resume",true],["GET","/api/internal/factory/zoo3093-resume",false],["POST","/api/internal/factory/other",false],["PATCH","/api/internal/factory/zoo3093-resume",false]]){
+  assert.equal(runInNewContext(pred,{request:{method},url:{pathname}}),expected);
+ }
+ assert.match(source,/const allowedMethod =\s*isExactZooFactoryResumePost \|\|/);
+ assert.match(source,/if \(url\.pathname === "\/api\/internal\/factory\/zoo3093-resume"\) \{\s*requireConfig\(env\);\s*return respond\(request,env,await exactZooFactoryDrain\(request,env,factoryBatchProcess\)\);/);
+});
