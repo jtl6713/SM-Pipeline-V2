@@ -24,6 +24,7 @@ import {
 } from "./worker-functions-01.mjs";
 import { serveMichiganV2CachedPreview } from "./michigan-review-preview-cache.mjs";
 import { fetchAuthorizedDrivePhoto } from "./media-asset-drive-photo.mjs";
+import { isIssue3030Photo, serveIssue3030Photo } from "./asset-private-preview-3030.mjs";
 import { evaluateReviewPackage } from "./review-package-readiness.mjs";
 import { studioReadCarouselSlides } from "./carousel-slide-read.mjs";
 import { verifyFacebookStoryByMediaId, facebookStoryDefiniteAuthRejection } from "./facebook-story-remote-verification.mjs";
@@ -6805,6 +6806,15 @@ export async function mediaAssetImagePreview(request, env, url, authorization) {
   }
 
   const recordId = mediaAssetPreviewRecordIdFromPath(url);
+  if (isIssue3030Photo(recordId)) {
+    if (studioAssetsReadSource(env) !== "supabase") throw new HttpError(503, "ASSET_PREVIEW_CANONICAL_SOURCE_UNAVAILABLE");
+    return await serveIssue3030Photo({
+      request, env, assetId: recordId,
+      authorizeProfile: profileId => resolveWorkingContentProfile(env, authorization, profileId),
+      readRows: id => supabaseRest(env, "media_assets?airtable_record_id=eq."+encodeURIComponent(id)+
+        "&select=airtable_record_id,asset_status,active,do_not_use,media_class,mime_type,file_size_bytes,google_drive_file_id,metadata&limit=2"),
+    });
+  }
   const record = await airtableFetch(env, env.AIRTABLE_MEDIA_TABLE_ID, recordId);
   if (Boolean(f(record, "Do_Not_Use"))) {
     throw new HttpError(403, "This media asset is marked Do Not Use");
