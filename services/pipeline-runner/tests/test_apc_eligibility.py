@@ -294,3 +294,29 @@ def test_ap1c_do_not_reuse_finished_children_after_ap4c_expiry_source():
     assert "and not force_fresh_children" in source
     assert 'force_fresh_children = _requires_fresh_children_after_expired_parent(output)' in source
     assert '"recovered_expired_parent_children": force_fresh_children' in source
+
+
+def test_3159_terminal_carousel_poll_is_parked_without_erasing_identity():
+    # Regression of the actual mutation dictionaries, not a mock provider call.
+    import ast
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "apc"
+    for name, expected in (("ap2c.py", 2), ("ap3p.py", 1)):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        patches = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                pairs = {key.value: val for key, val in zip(node.keys, node.values) if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+                state = pairs.get("IG_Carousel_Status")
+                if isinstance(state, ast.Name) and state.id == "STATUS_RETRY":
+                    patches.append(pairs)
+        assert len(patches) == expected
+        for fields in patches:
+            assert ast.literal_eval(fields["Publish_Retry_Eligible"]) is False
+            assert ast.literal_eval(fields["Publish_Next_Retry_At"]) is None
+            assert ast.literal_eval(fields["IG_Carousel_Next_Retry_At"]) is None
+            assert not {"IG_Carousel_Parent_Container_ID", "IG_Carousel_Parent_Created_At", "IG_Carousel_Parent_Last_Checked_At", "IG_Carousel_Parent_Poll_Attempt_Count", "IG_Carousel_Parent_Response_JSON", "Do_Not_Publish", "Auto_Publish_Enabled", "Review_Status", "Output_Status"}.intersection(fields)
+            assert "RECONCILIATION-REQUIRED" in ast.unparse(fields["IG_Carousel_Error_Message"])
+    parked = _record(Platform="Instagram", Platform_Output_Type="Instagram Carousel", Output_Status="Approved for Publishing", Publish_Status="Ready to Publish", Publish_Method="Automated", Auto_Publish_Enabled=True, IG_Carousel_Status="Retry Pending", Publish_Retry_Eligible=False, IG_Carousel_Parent_Container_ID="123456789")
+    for gate in (ap0c_eligibility_reason, ap1c_eligibility_reason, ap2c_eligibility_reason, ap3c_eligibility_reason, ap3p_eligibility_reason, ap4c_eligibility_reason):
+        assert gate(parked) is not None
