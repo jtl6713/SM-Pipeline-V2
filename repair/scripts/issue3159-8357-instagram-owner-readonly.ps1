@@ -1,7 +1,7 @@
 # Exact #8357 evidence only. No provider or output writes; no retry authorization.
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
-$r=[ordered]@{output=8357;read_only=$true;owner_verified=$false;inventory_complete=$false;provider_get_calls=0;provider_writes=0;output_writes=0;retry_authorized=$false;posts_scanned=0;child_statuses=@();exact_caption_candidates=@();canonical_unchanged=$false;reason='unverified';phase='init';failure_class=$null}
+$r=[ordered]@{output=8357;read_only=$true;owner_verified=$false;inventory_complete=$false;inventory_pages=0;oldest_timestamp=$null;newest_timestamp=$null;timestamp_order_verified=$true;provider_get_calls=0;provider_writes=0;output_writes=0;retry_authorized=$false;posts_scanned=0;child_statuses=@();exact_caption_candidates=@();canonical_unchanged=$false;reason='unverified';phase='init';failure_class=$null}
 $expectedChildren=@('18117284342139610','18117284369139610','18117284408139610','18117284441139610','18117284492139610','18117284531139610','18117284567139610','18117284609139610')
 function Read-EnvValue([string]$name){
   $line=@(Get-Content -LiteralPath $envfile|Where-Object{$_ -match ('^\s*'+[regex]::Escape($name)+'\s*=')}|Select-Object -Last 1)
@@ -81,8 +81,10 @@ try {
   $start=[DateTimeOffset]::Parse([string]$o.error_messages.Studio_Publish_Dispatch_At).AddMinutes(-10)
   $params=@{fields='id,caption,timestamp,media_type,permalink';limit='100'}
   $seen=@{}
+  $previous=$null
   for($i=0;$i -lt 5;$i++){
     $data=GraphGet ($account+'/media') $params
+    $r.inventory_pages++
     if($null -eq $data.data){throw 'provider_inventory_unavailable'}
     $older=$false
     foreach($post in @($data.data)){
@@ -90,6 +92,10 @@ try {
       if(-not $id -or $seen.ContainsKey($id)){continue}
       $seen[$id]=$true;$r.posts_scanned++
       $stamp=[DateTimeOffset]::Parse([string]$post.timestamp)
+      if($null -eq $r.newest_timestamp){$r.newest_timestamp=$stamp.ToUniversalTime().ToString('o')}
+      if($null -ne $previous -and $stamp -gt $previous){$r.timestamp_order_verified=$false}
+      if($null -eq $r.oldest_timestamp -or $stamp -lt [DateTimeOffset]::Parse($r.oldest_timestamp)){$r.oldest_timestamp=$stamp.ToUniversalTime().ToString('o')}
+      $previous=$stamp
       if($stamp -lt $start){$older=$true;continue}
       $message=Norm ([string]$post.caption)
       if($message -eq $expected -or $message -eq $caption){
@@ -97,7 +103,8 @@ try {
       }
     }
     if(-not $data.paging.next){$r.inventory_complete=$true;break}
-    if($older){break}
+    # Continue within the existing five-page budget even after reaching the date boundary.
+    # Only the absence of a next page establishes complete account inventory.
     $after=[string]$data.paging.cursors.after
     if(-not $after -or $after -eq $params.after){throw 'pagination_unverified'}
     $params.after=$after
