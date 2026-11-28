@@ -339,3 +339,36 @@ def test_vibe_shared_render_never_exempts_finished_passthrough_or_single_clip():
     assert is_shared_render_eligible(normal) is False
     assert is_shared_render_eligible(fake) is False
     assert is_shared_render_eligible(passthrough) is False
+
+
+def test_propagation_preserves_approved_siblings_and_still_repairs_pending():
+    from unittest.mock import Mock
+    from studio_produce.shared_render import propagate_render_result
+
+    source = _output(id="recSource", Final_File_URL="https://media.chicagoshining.com/render.mp4")
+    rows = {
+        "recApproved": _output(id="recApproved", Output_Status="Approved for Publishing", Review_Status="Approved"),
+        "recReviewDrift": _output(id="recReviewDrift", Output_Status="Ready for Review", Review_Status="Approved"),
+        "recScheduled": _output(id="recScheduled", Studio_Scheduled_At="2026-12-01T01:00:00Z"),
+        "recAttempt": _output(id="recAttempt", Publish_Attempt_Count=1),
+        "recCompleted": _output(id="recCompleted", Render_Status="Rendered", Final_File_URL="https://media.chicagoshining.com/own.mp4"),
+        "recPending": _output(id="recPending", Render_Status="Waiting in Render Queue"),
+    }
+    client = Mock()
+    client.get_record.side_effect = lambda _table, ident: rows[ident]
+    assert propagate_render_result(client, source, list(rows)) == ["recPending"]
+    assert client.update_record.call_count == 1
+    assert client.update_record.call_args.args[1] == "recPending"
+
+
+def test_propagation_fails_closed_when_live_sibling_identity_is_wrong():
+    import pytest
+    from unittest.mock import Mock
+    from studio_produce.shared_render import propagate_render_result
+
+    source = _output(id="recSource", Final_File_URL="https://media.chicagoshining.com/render.mp4")
+    client = Mock()
+    client.get_record.return_value = _output(id="recOther")
+    with pytest.raises(RuntimeError, match="sibling identity"):
+        propagate_render_result(client, source, ["recExpected"])
+    client.update_record.assert_not_called()
