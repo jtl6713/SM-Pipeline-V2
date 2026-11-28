@@ -27,7 +27,10 @@ def needs_story_voiceover(output):
 def story_text(script, max_words=20):
     # Never truncate a word or a sentence. Prefer the first complete concise
     # sentence, which normally describes the first image of the companion.
-    for sentence in re.findall(r"[^.!?]+[.!?]+", str(script or "").strip()):
+    # A period embedded inside an initialism (U.S., a.m.) is not a
+    # sentence boundary. Require whitespace or end of input after punctuation;
+    # the previous character-class split returned the incomplete "continental U.".
+    for sentence in re.findall(r".+?[.!?]+(?=\s|$)", str(script or "").strip(), flags=re.S):
         s=" ".join(sentence.split())
         if 3<=len(s.split())<=max_words:
             return s
